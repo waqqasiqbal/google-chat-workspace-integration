@@ -58,9 +58,16 @@ you're not sure which kind it is.
 
 **Fake tags are fixed automatically (user's rule).** "＠Name" (full-width) or
 "@Name" in a draft from anyone becomes a real mention if the name matches one
-cached contact. If it doesn't resolve, look the person up and use `@email`
-before sending. Never send a tag that won't notify the person, and don't ask
-the user about it — just fix it.
+cached contact. If it doesn't resolve, `send`/`edit` refuse with "Unresolved
+tag(s)": look the person up and use `@email`, then send again. Never send a tag
+that won't notify the person, and don't ask the user about it — just fix it.
+
+**@all:** `send`/`edit` refuse text containing `@all` unless you pass
+`--mention-all`. Use it only when the user's approved text tags everyone.
+The result's `mentioned` list shows exactly who was notified.
+
+**Attachments:** `--attach` refuses `.env*` files, anything in `.credentials/`
+and `~/.ssh`.
 
 **Tagging people:** write `@their.email@company.com` in the text — the CLI turns
 it into a real mention and Chat shows their name. Look the email up with

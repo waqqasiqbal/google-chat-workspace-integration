@@ -37,17 +37,27 @@ for (let i = 0; i < rest.length; i++) {
   if (a.startsWith("--")) {
     const key = a.slice(2);
     const next = rest[i + 1];
-    if (next === undefined || next.startsWith("--")) flags[key] = "true";
+    // --text always takes the next arg, so "--text '--- Summary ---'" works.
+    if (next === undefined || (key !== "text" && next.startsWith("--"))) flags[key] = "true";
     else flags[key] = rest[++i];
   } else positional.push(a);
 }
-const num = (k: string, d: number) => (flags[k] ? Number(flags[k]) : d);
+const num = (k: string, d: number) => {
+  if (!flags[k]) return d;
+  const n = Number(flags[k]);
+  if (!Number.isFinite(n) || n <= 0) throw new Error(`--${k} must be a positive number.`);
+  return n;
+};
 
 /** "30m", "2h", "3d" or an ISO timestamp -> ISO timestamp. */
 function since(input: string | undefined, fallback: string): string {
   const v = input ?? fallback;
   const m = /^(\d+)([mhd])$/.exec(v);
-  if (!m) return new Date(v).toISOString();
+  if (!m) {
+    const d = new Date(v);
+    if (isNaN(d.getTime())) throw new Error(`Bad time "${v}": use 30m, 2h, 3d or an ISO date.`);
+    return d.toISOString();
+  }
   const unit = { m: 60e3, h: 3600e3, d: 86400e3 }[m[2] as "m" | "h" | "d"];
   return new Date(Date.now() - Number(m[1]) * unit).toISOString();
 }
@@ -128,16 +138,14 @@ function findPeople(query: string): string[] {
 }
 
 /**
- * "@someone@company.com" -> a real mention. Chat accepts users/{email}
- * directly, and fills in the person's display name itself.
- */
-/**
  * "@Muhammad Asim" / "＠Muhammad Asim" (full-width) -> real mention when the
  * name matches exactly one cached contact. Tries 3, then 2, then 1 words.
+ * Names that match nobody or several people are collected in `unresolved`.
  */
-function nameMentions(text: string): string {
+function nameMentions(text: string, unresolved: string[]): string {
   return text.replace(
-    /(^|[\s(])[@＠]((?:[A-Z][\w'’-]*)(?: [A-Z][\w'’-]*){0,2})/g,
+    // Not followed by ".x" or "@": "@John.Smith@corp.com" is an email, not a name.
+    /(^|[\s(])[@＠]((?:[A-Z][\w'’-]*)(?: [A-Z][\w'’-]*){0,2})(?![\w'’-]|[.@]\w)/g,
     (whole, pre: string, names: string) => {
       const words = names.split(" ");
       for (let n = words.length; n >= 1; n--) {
@@ -150,23 +158,57 @@ function nameMentions(text: string): string {
           return `${pre}<users/${hits[0][0]}>${rest ? " " + rest : ""}`;
         }
       }
+      if (names.toLowerCase() !== "all") unresolved.push(names);
       return whole.replace("＠", "@");
     }
   );
 }
 
-function withMentions(text: string): string {
-  return nameMentions(text.replace(/(^|[\s(])＠(?=[\w.+-]+@)/g, "$1@"))
-    .replace(
-      /(^|[\s(])@([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/g,
-      (_, pre, email) => `${pre}<users/${email}>`
-    )
-    .replace(/(^|[\s(])@all\b/g, (_, pre) => `${pre}<users/all>`);
+/**
+ * Turn every tag into a real mention and return who gets notified.
+ * "@someone@company.com" works directly (Chat fills in the display name).
+ * "@all" only becomes a mention with --mention-all, so quoted text can't
+ * notify a whole space. Throws rather than posting a fake tag.
+ */
+function withMentions(text: string): { text: string; mentions: string[] } {
+  const unresolved: string[] = [];
+  let out = nameMentions(text.replace(/(^|[\s(])＠(?=[\w.+-]+@)/g, "$1@"), unresolved).replace(
+    /(^|[\s(])@([\w.+-]+@[\w-]+(?:\.[\w-]+)+)/g,
+    (_, pre, email) => `${pre}<users/${email.toLowerCase()}>`
+  );
+  // "@all" alone, not "@all-hands" or "@all.x".
+  const allTag = /(^|[\s(])[@＠]all(?![\w-]|\.\w)/gi;
+  if (flags["mention-all"] === "true") out = out.replace(allTag, (_, pre) => `${pre}<users/all>`);
+  else if (allTag.test(out))
+    throw new Error("Text contains @all. Pass --mention-all to notify everyone, or reword it.");
+  if (unresolved.length)
+    throw new Error(
+      `Unresolved tag(s): ${unresolved.map((n) => "@" + n).join(", ")}. ` +
+        "Look the person up with `contacts <name>` and use @email."
+    );
+  const mentions = [...out.matchAll(/<users\/([^>]+)>/g)].map((m) => m[1]);
+  return { text: out, mentions: [...new Set(mentions)] };
+}
+
+/** Refuse to upload credentials, env files or SSH keys. */
+async function checkAttachable(file: string): Promise<string> {
+  const real = await fs.realpath(file);
+  const base = path.basename(real);
+  const home = process.env.HOME;
+  const under = (dir: string) => real.startsWith(dir + path.sep);
+  if (
+    under(path.dirname(config.tokenPath)) ||
+    base.startsWith(".env") ||
+    (home && under(path.join(home, ".ssh")))
+  )
+    throw new Error(`Refusing to attach ${file}: it holds credentials.`);
+  return real;
 }
 
 /** Upload a local file to the space; returns the attachment for messages.create. */
 async function upload(space: string, file: string) {
   const { createReadStream } = await import("node:fs");
+  file = await checkAttachable(file);
   const ext = path.extname(file).toLowerCase();
   const mimeType =
     { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
@@ -251,11 +293,20 @@ async function resolve(target: string | undefined, create = false): Promise<stri
   if (target.startsWith("spaces/")) return target;
   const alias = aliases()[target.toLowerCase()];
   if (alias) return alias;
-  if (target.includes("@")) return dmFor(target, create);
+  if (target.includes("@")) return dmFor(target.toLowerCase(), create);
 
   const t = target.toLowerCase();
   const emails = findPeople(target);
   if (emails.length === 1) return dmFor(emails[0], create);
+  // Several people match: don't fall through to a space with a similar name.
+  if (emails.length > 1)
+    throw new Error(
+      JSON.stringify({
+        ambiguous: target,
+        contacts: emails.slice(0, 15).map((e) => `${contacts.people[e]?.name ?? ""} <${e}>`),
+        hint: "Pass one of these emails exactly.",
+      })
+    );
 
   const spaces = (await listAllSpaces()).filter((s) =>
     (s.displayName ?? "").toLowerCase().includes(t)
@@ -302,6 +353,10 @@ function shape(m: Message) {
   };
 }
 
+/**
+ * The newest `cap` messages since sinceIso, returned oldest-first. Fetches
+ * newest-first so a busy space never hides its latest messages behind the cap.
+ */
 async function messagesSince(space: string, sinceIso: string, cap = 200) {
   const out: Message[] = [];
   let pageToken: string | undefined;
@@ -310,23 +365,32 @@ async function messagesSince(space: string, sinceIso: string, cap = 200) {
       parent: space,
       pageSize: Math.min(100, cap - out.length),
       filter: `createTime > "${sinceIso}"`,
+      orderBy: "createTime desc",
       pageToken,
     });
     out.push(...(r.data.messages ?? []));
     pageToken = r.data.nextPageToken ?? undefined;
   } while (pageToken && out.length < cap);
-  return out;
+  return Object.assign(out.reverse(), { capped: !!pageToken });
 }
 
-/** Run fn over items with bounded concurrency. */
+/**
+ * Run fn over items with bounded concurrency. One failing item (a space we
+ * lost access to, a rate limit) becomes undefined instead of failing all.
+ */
+let poolFailures = 0;
 async function pool<T, R>(items: T[], n: number, fn: (t: T) => Promise<R>) {
-  const out: R[] = [];
+  const out: (R | undefined)[] = [];
   let i = 0;
   await Promise.all(
     Array.from({ length: Math.min(n, items.length) }, async () => {
       while (i < items.length) {
         const idx = i++;
-        out[idx] = await fn(items[idx]);
+        try {
+          out[idx] = await fn(items[idx]);
+        } catch {
+          poolFailures++;
+        }
       }
     })
   );
@@ -431,15 +495,14 @@ const commands: Record<string, () => Promise<unknown>> = {
       });
       const last = rs.data.lastReadTime ?? window;
       if ((s.lastActiveTime ?? "") <= last) return null;
-      const msgs = (await messagesSince(s.name!, last, 50)).filter(
-        (m) => m.sender?.name !== me.id
-      );
+      const fetched = await messagesSince(s.name!, last, 50);
+      const msgs = fetched.filter((m) => m.sender?.name !== me.id);
       if (!msgs.length) return null;
       return {
         space: s.name,
         displayName: label(s),
         type: s.spaceType,
-        unread: msgs.length,
+        unread: fetched.capped ? `${msgs.length}+` : msgs.length,
         messages: msgs.slice(-num("per", 5)).map(shape),
       };
     });
@@ -463,7 +526,10 @@ const commands: Record<string, () => Promise<unknown>> = {
         )
         .map((m) => ({ displayName: label(s), space: s.name, ...shape(m) }));
     });
-    return hits.flat().sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
+    return hits
+      .flat()
+      .filter((h) => h !== undefined)
+      .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? ""));
   },
 
   async search() {
@@ -481,7 +547,10 @@ const commands: Record<string, () => Promise<unknown>> = {
     );
     return {
       searched: { spaces: spaces.length, since: window },
-      results: hits.flat().sort((a, b) => (a.time ?? "").localeCompare(b.time ?? "")),
+      results: hits
+        .flat()
+        .filter((h) => h !== undefined)
+        .sort((a, b) => (a.time ?? "").localeCompare(b.time ?? "")),
     };
   },
 
@@ -490,13 +559,14 @@ const commands: Record<string, () => Promise<unknown>> = {
     const space = await resolve(positional[0], true);
     const text = flags.text ?? (await readStdin());
     if (!text?.trim()) throw new Error("Nothing to send: pass --text or pipe text in.");
+    const tagged = withMentions(text);
     const attachment = flags.attach
       ? await Promise.all(flags.attach.split(",").map((f) => upload(space, f.trim())))
       : undefined;
     const r = await chat.spaces.messages.create({
       parent: space,
       requestBody: {
-        text: withMentions(text),
+        text: tagged.text,
         ...(attachment ? { attachment } : {}),
         ...(flags.thread ? { thread: { name: flags.thread } } : {}),
       },
@@ -504,18 +574,22 @@ const commands: Record<string, () => Promise<unknown>> = {
         ? { messageReplyOption: "REPLY_MESSAGE_FALLBACK_TO_NEW_THREAD" }
         : {}),
     });
-    return { sent: shape(r.data) };
+    return { sent: shape(r.data), mentioned: tagged.mentions };
   },
 
   async edit() {
+    await self();
     const name = positional[0];
+    if (!name) throw new Error("Missing message name.");
     const text = flags.text ?? (await readStdin());
+    if (!text?.trim()) throw new Error("Nothing to change: pass --text or pipe text in.");
+    const tagged = withMentions(text);
     const r = await chat.spaces.messages.patch({
       name,
       updateMask: "text",
-      requestBody: { text: withMentions(text) },
+      requestBody: { text: tagged.text },
     });
-    return { edited: shape(r.data) };
+    return { edited: shape(r.data), mentioned: tagged.mentions };
   },
 
   async delete() {
@@ -524,11 +598,13 @@ const commands: Record<string, () => Promise<unknown>> = {
   },
 
   /**
-   * Save a message's uploaded attachments to --out (default: current dir).
-   * Drive files are only listed: this login has no Drive scope.
+   * Save a message's uploaded attachments to --out (default: downloads/ in
+   * this project). The sender picks the file names, so names are sanitised
+   * and existing files are never overwritten. Drive files are only listed:
+   * this login has no Drive scope.
    */
   async download() {
-    const out = flags.out ?? ".";
+    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
     await fs.mkdir(out, { recursive: true });
     const m = (await chat.spaces.messages.get({ name: positional[0] })).data;
     const saved: string[] = [];
@@ -543,9 +619,21 @@ const commands: Record<string, () => Promise<unknown>> = {
         { resourceName: ref, alt: "media" },
         { responseType: "arraybuffer" }
       );
-      const file = path.join(out, path.basename(a.contentName ?? "attachment"));
-      await fs.writeFile(file, Buffer.from(r.data as ArrayBuffer));
-      saved.push(file);
+      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
+      const clean =
+        path.basename(a.contentName ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
+        "attachment";
+      const { name: stem, ext } = path.parse(clean);
+      for (let n = 0; ; n++) {
+        const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
+        try {
+          await fs.writeFile(file, Buffer.from(r.data as ArrayBuffer), { flag: "wx" });
+          saved.push(file);
+          break;
+        } catch (err: any) {
+          if (err?.code !== "EEXIST") throw err;
+        }
+      }
     }
     return { message: m.name, saved, ...(skipped.length ? { skipped } : {}) };
   },
@@ -684,7 +772,9 @@ if (!run) {
   process.exit(1);
 }
 try {
-  console.log(JSON.stringify(await run(), null, 2));
+  const result = await run();
+  console.log(JSON.stringify(result, null, 2));
+  if (poolFailures) console.error(`Warning: ${poolFailures} chat(s) could not be read and were skipped.`);
 } catch (err: any) {
   const msg = err?.errors?.[0]?.message ?? err?.message ?? String(err);
   console.error(`Error: ${msg}`);

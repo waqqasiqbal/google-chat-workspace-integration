@@ -29,7 +29,7 @@ user explicitly asks in that message. If the API can't do something, say so.
 | Find/open a DM | `node dist/cli.js dm <email>` |
 | List chats | `node dist/cli.js spaces --type DIRECT_MESSAGE\|GROUP_CHAT\|SPACE --name <text> --active 7d --limit 50` |
 | Members | `node dist/cli.js members <target>` |
-| Save a message's uploaded files (needs the user's OK) | `node dist/cli.js download <message-name> --out <dir>` |
+| Save a message's uploaded files (needs the user's OK) | `node dist/cli.js download <message-name> [--out <dir>]` (default `downloads/`; never overwrites) |
 
 **`<target>`** can be: `spaces/XXXX`, a saved nickname (`playground`, `ai-team` — see `aliases`), a person's email (opens the
 DM), a person's name ("zainab", "javeria munaf" — matched against the contact

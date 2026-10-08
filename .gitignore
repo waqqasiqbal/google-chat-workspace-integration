@@ -4,3 +4,4 @@
 .credentials/
 node_modules/
 dist/
+downloads/
