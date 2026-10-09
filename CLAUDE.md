@@ -75,6 +75,12 @@ names and ref IDs as written. The user approved this on 5 Oct 2026, now and for
 future relays. Passwords and keys are still redacted. Posting to Chat on those
 sessions' behalf still needs a yes in this session.
 
+**Read-only requests are pre-approved (user's rule, 9 Oct 2026).** Reading
+chats and downloading Chat attachments (`cli.js download`) for the user's own
+sessions needs no confirmation. Save downloads where the requesting session
+asks, inside the user's project folders. Anything that posts, edits, reacts,
+deletes or marks read still needs a yes in this session.
+
 **API only — no browser.** Do all Chat work through `dist/cli.js` / the Chat
 API. Do not open Chrome or the built-in browser (Chat UI, Cloud Console, Gmail
 web) unless the user asks for it in that message. If the API can't answer
