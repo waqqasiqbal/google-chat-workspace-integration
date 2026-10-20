@@ -12,7 +12,9 @@ not used.
 ## Google Cloud setup
 
 1. In the Google Cloud console, enable the **Google Chat API** for your project.
+   Also enable the **Gmail API** if you want `gmail-download` (below).
 2. Configure the OAuth consent screen (Internal is fine for a Workspace domain).
+   Add the `gmail.readonly` scope there if you want `gmail-download`.
 3. Create an **OAuth client ID** of type *Web application* and add
    `http://localhost:8080/oauth2callback` as an authorized redirect URI.
 4. Copy the client ID and secret into `.env` (see [Environment](#environment)).
@@ -64,6 +66,22 @@ node dist/cli.js <command> [args] [--flags]
 | `contacts [name]` | Look someone up in the local contact cache |
 | `aliases` | Saved space nicknames |
 | `download <message> [--out dir]` | Save a message's uploaded attachments (default `downloads/`, never overwrites) |
+
+### Email attachments
+
+The Gmail connector that other Claude sessions use can read an email's
+attachment metadata but has no tool to fetch the bytes. This one command fills
+that gap, going through the Gmail API with the read-only `gmail.readonly` scope.
+
+| Command | What it does |
+| --- | --- |
+| `gmail-download <messageId> [--attachment id] [--out dir]` | Save a Gmail message's attachments (default `downloads/`, same name-cleaning and no-overwrite as `download`). `<messageId>` is the id from the Gmail connector's `get_message`/`get_thread`, or the hex id in a Gmail URL. `--attachment` fetches just one part. |
+
+The scope is **not** in the default login. To enable it: add `gmail.readonly`
+to `GOOGLE_CHAT_SCOPES` (it is already in the built-in default list in
+`src/config.ts`), enable the Gmail API and add the scope on the consent screen
+(see [Google Cloud setup](#google-cloud-setup)), then re-run `npm run login` so
+the cached token picks it up.
 
 ### Writing
 
