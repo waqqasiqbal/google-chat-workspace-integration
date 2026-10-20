@@ -12,6 +12,7 @@ import path from "node:path";
 import { google, chat_v1 } from "googleapis";
 import { getAuthorizedClient } from "./auth/client.js";
 import { chatApi } from "./chat.js";
+import { gmailApi, attachmentParts } from "./gmail.js";
 import { config, projectRoot } from "./config.js";
 
 type Message = chat_v1.Schema$Message;
@@ -636,6 +637,66 @@ const commands: Record<string, () => Promise<unknown>> = {
       }
     }
     return { message: m.name, saved, ...(skipped.length ? { skipped } : {}) };
+  },
+
+  /**
+   * Save a Gmail message's attachments to --out (default: downloads/ in this
+   * project). Mirrors `download` for Chat but goes through the Gmail API,
+   * which the Gmail connector other sessions use cannot do. Read-only:
+   * needs the gmail.readonly scope. Pass a message id as the first argument
+   * (the id from the Gmail connector's get_message, or a Gmail URL's
+   * /.../<id> hex id). --attachment <id> fetches just that one part;
+   * otherwise every attachment on the message is saved.
+   */
+  async "gmail-download"() {
+    const id = positional[0];
+    if (!id) throw new Error("Usage: gmail-download <messageId> [--attachment <id>] [--out <dir>]");
+    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
+    await fs.mkdir(out, { recursive: true });
+    const gmail = await gmailApi();
+    const msg = (
+      await gmail.users.messages.get({ userId: "me", id, format: "full" })
+    ).data;
+    let parts = attachmentParts(msg.payload);
+    if (flags.attachment) parts = parts.filter((p) => p.body?.attachmentId === flags.attachment);
+    const saved: string[] = [];
+    const skipped: { name?: string | null; reason: string }[] = [];
+    for (const p of parts) {
+      const attachmentId = p.body?.attachmentId;
+      if (!attachmentId) {
+        skipped.push({ name: p.filename, reason: "no attachment id" });
+        continue;
+      }
+      const a = (
+        await gmail.users.messages.attachments.get({
+          userId: "me",
+          messageId: id,
+          id: attachmentId,
+        })
+      ).data;
+      if (!a.data) {
+        skipped.push({ name: p.filename, reason: "no data" });
+        continue;
+      }
+      // Gmail returns base64url (RFC 4648 §5): - _ instead of + /.
+      const buf = Buffer.from(a.data, "base64url");
+      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
+      const clean =
+        path.basename(p.filename ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
+        "attachment";
+      const { name: stem, ext } = path.parse(clean);
+      for (let n = 0; ; n++) {
+        const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
+        try {
+          await fs.writeFile(file, buf, { flag: "wx" });
+          saved.push(file);
+          break;
+        } catch (err: any) {
+          if (err?.code !== "EEXIST") throw err;
+        }
+      }
+    }
+    return { message: id, saved, ...(skipped.length ? { skipped } : {}) };
   },
 
   async react() {

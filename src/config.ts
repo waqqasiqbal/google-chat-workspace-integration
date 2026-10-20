@@ -46,6 +46,9 @@ export const config = {
       "https://www.googleapis.com/auth/chat.users.sections",
       "https://www.googleapis.com/auth/chat.users.availability",
       "https://www.googleapis.com/auth/userinfo.email",
+      // Read-only Gmail: lets `cli.js gmail-download` fetch attachment bytes
+      // (the Gmail connector other sessions use exposes no attachment tool).
+      "https://www.googleapis.com/auth/gmail.readonly",
     ].join(",")
   )
     .split(",")
