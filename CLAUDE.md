@@ -95,6 +95,12 @@ something, say so and ask rather than switching to the browser.
 
 ## Constraints worth knowing
 
+**Worktrees live under `.claude/worktrees/` (gitignored).** Don't call
+`EnterWorktree` on `../Google Chat MCP-worktrees/*`. Work there with absolute
+paths, or create new worktrees under `.claude/worktrees/`. Claude Code only
+manages worktrees in that folder; for any other path it raises a permission
+prompt the user can't see from a phone, and the session stalls.
+
 **stdout is the JSON-RPC channel.** Anything written to stdout corrupts the
 protocol. Never `console.log` in server code — use `console.error`. This is why
 `config.ts` calls `dotenv.config({ quiet: true })`: the default dotenv banner
