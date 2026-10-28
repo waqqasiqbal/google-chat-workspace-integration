@@ -138,7 +138,7 @@ All of this lives in `.credentials/` (gitignored, mode 0600):
 | `GOOGLE_CLIENT_SECRET` | yes | — |
 | `GOOGLE_REDIRECT_URI` | no | `http://localhost:8080/oauth2callback` |
 | `TOKEN_STORE_PATH` | no | `./.credentials/token.json` |
-| `GOOGLE_CHAT_SCOPES` | no | Chat spaces, memberships, messages, reactions, read state, custom emoji, pins, space settings, sections, availability, plus `userinfo.email` |
+| `GOOGLE_CHAT_SCOPES` | no | Chat spaces, memberships, messages, reactions, read state, custom emoji, pins, space settings, sections, availability, plus `gmail.readonly` and `userinfo.email` |
 | `CHAT_TEST_SPACE` | no | Space used as the `playground` nickname for test sends |
 | `CHAT_SPACE_<NAME>` | no | Space nicknames, e.g. `CHAT_SPACE_AI_TEAM=spaces/X` is `ai-team` |
 
