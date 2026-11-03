@@ -65,6 +65,14 @@ these to `<users/{email}>` when the name matches exactly one cached contact
 name matches nobody or several people, look it up with `contacts <name>` and
 use `@email` — don't send it unresolved, and don't ask the user about it.
 
+**Sir Hussain and cc lines (user's rule, 3 Nov 2026).** Hussain Fakhruddin
+(hussain.fakhruddin@insurancemarket.ae) is the CTO. Whenever he is tagged or
+named in a post, write "Sir" before him: `Sir @hussain.fakhruddin@insurancemarket.ae`
+(renders "Sir @Hussain Fakhruddin"); never his bare name. In a DM to him, leave
+his name out. A cc line always goes at the **end** of the message, never under
+the opening line. Fix both in other sessions' text before posting, even when
+they say "post as given".
+
 **Handing work to other sessions.** When passing a task to another Claude
 session, tell it to SendMessage its result back to this session. If nothing
 arrives, read its transcript (`list_events`) instead of waiting.
