@@ -114,9 +114,12 @@ for (const [id, email] of Object.entries(contacts.byId)) {
 const saveContacts = async () => {
   let disk: Partial<Contacts> = {};
   try {
-    disk = JSON.parse(await fs.readFile(contactsPath, "utf8")) ?? {};
+    disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+    if (!disk || typeof disk !== "object" || Array.isArray(disk))
+      throw new SyntaxError("contacts cache is not an object");
   } catch (err: any) {
     if (err instanceof SyntaxError) {
+      disk = {};
       // Writes are atomic, so this is real corruption: keep a copy, start fresh.
       await fs.rename(contactsPath, `${contactsPath}.corrupt-${Date.now()}`).catch(() => {});
     } else if (err?.code !== "ENOENT") {
@@ -317,10 +320,14 @@ async function outDir(): Promise<string> {
     const base =
       segs[1] === ".claude" && segs[2] === "worktrees" && segs[3]
         ? 4
-        : segs[0].endsWith("-worktrees") && segs[1]
+        : segs[0].endsWith("-worktrees")
           ? 2
           : 1;
-    if (segs.slice(base - 1, base).some((seg) => seg.startsWith("."))) return false;
+    // The project (or worktree) itself must exist as named: no dot-folders
+    // besides the literal .claude of .claude/worktrees.
+    if (segs.length < base) return false;
+    if (segs.slice(0, base).some((seg, i) => seg.startsWith(".") && !(base === 4 && i === 1)))
+      return false;
     const below = segs.slice(base);
     // The nearest existing parent of a new folder may be the project itself.
     return (existingParent || below.length > 0) && !below.some((seg) => seg.startsWith("."));
@@ -345,16 +352,21 @@ async function outDir(): Promise<string> {
  */
 const SAFE_EXT =
   /\.(pdf|docx?|xlsx?|xlsm|csv|tsv|pptx?|odt|ods|odp|rtf|txt|md|eml|msg|png|jpe?g|gif|webp|heic|bmp|tiff?|mp4|mov|webm|mp3|wav|m4a|ogg|zip)$/i;
-// Instruction files agents pick up: CLAUDE.md, AGENTS.md, CONVENTIONS.md,
-// SKILL.md, copilot-instructions.md... (all-caps names and known ones).
-const RISKY_NAME =
-  /^[A-Z0-9_-]+(\.local)?\.md$|^(claude|agents?|gemini|qwen|skill|readme|conventions|copilot-instructions)(\.local)?\.md$/i;
+// Instruction files agents pick up: CLAUDE.md, AGENTS.override.md, SKILL (1).md,
+// copilot-instructions.md... Judged on the stem before the first dot, space
+// or bracket: all-caps stems and known names.
+const KNOWN_INSTRUCTION = /^(claude|agents?|gemini|qwen|skill|readme|conventions|copilot-instructions)$/i;
+function instructionLike(name: string): boolean {
+  if (!/\.md$/i.test(name)) return false;
+  const stem = name.split(/[ .(]/)[0];
+  return (/^[A-Z0-9_-]+$/.test(stem) && /[A-Z]/.test(stem)) || KNOWN_INSTRUCTION.test(stem);
+}
 function safeName(raw: string | null | undefined): string {
   const base = path.basename(raw ?? "");
   const clean =
     base.replace(/[^\w .()-]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/, "") || "attachment";
   if (!READONLY || clean === "attachment") return clean;
-  const risky = base.startsWith(".") || !SAFE_EXT.test(clean) || RISKY_NAME.test(clean);
+  const risky = base.startsWith(".") || !SAFE_EXT.test(clean) || instructionLike(clean);
   return risky ? `attachment-${clean}` : clean;
 }
 
@@ -636,9 +648,7 @@ const commands: Record<string, () => Promise<unknown>> = {
       // A thread's first message is named X.X; accept the short form X too.
       const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
       const status = Number(err?.status ?? err?.response?.status ?? err?.code);
-      const notFound =
-        status === 404 || status === 400 || /not.?found|malformed/i.test(err?.message ?? "");
-      if (!short || !notFound) throw err;
+      if (!short || (status !== 404 && status !== 400)) throw err;
       m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
     }
     return {
