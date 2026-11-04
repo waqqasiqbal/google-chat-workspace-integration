@@ -98,7 +98,16 @@ type Contacts = {
 };
 let contacts: Contacts = { byId: {}, people: {}, names: {} };
 try {
-  contacts = { ...contacts, ...JSON.parse(await fs.readFile(contactsPath, "utf8")) };
+  const disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+  // Ignore a cache of the wrong shape; saveContacts sets it aside.
+  if (disk && typeof disk === "object" && !Array.isArray(disk))
+    contacts = {
+      ...contacts,
+      ...disk,
+      byId: { ...(disk.byId ?? {}) },
+      people: { ...(disk.people ?? {}) },
+      names: { ...(disk.names ?? {}) },
+    };
 } catch {}
 let contactsDirty = false;
 // Older caches only had byId; make sure each of those has a people entry.
@@ -648,7 +657,8 @@ const commands: Record<string, () => Promise<unknown>> = {
       // A thread's first message is named X.X; accept the short form X too.
       const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
       const status = Number(err?.status ?? err?.response?.status ?? err?.code);
-      if (!short || (status !== 404 && status !== 400)) throw err;
+      const notFound = status === 404 || status === 400 || err?.code === "NOT_FOUND";
+      if (!short || !notFound) throw err;
       m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
     }
     return {
