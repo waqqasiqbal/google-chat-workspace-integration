@@ -8,6 +8,7 @@
  * session started elsewhere cannot use it by accident.
  */
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { google, chat_v1 } from "googleapis";
 import { getAuthorizedClient } from "./auth/client.js";
@@ -107,12 +108,28 @@ for (const [id, email] of Object.entries(contacts.byId)) {
     contactsDirty = true;
   }
 }
-// Several sessions may run chat-read at once: write a temp file and rename it
-// so a reader never sees a half-written cache.
+// Several sessions may run chat-read at once: merge what others saved since
+// we loaded (our entries win), then write a temp file and rename it so a
+// reader never sees a half-written cache.
 const saveContacts = async () => {
+  try {
+    const disk: Partial<Contacts> = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+    contacts = {
+      ...disk,
+      ...contacts,
+      byId: { ...disk.byId, ...contacts.byId },
+      people: { ...disk.people, ...contacts.people },
+      names: { ...disk.names, ...contacts.names },
+    };
+  } catch {}
   const tmp = `${contactsPath}.${process.pid}.tmp`;
-  await fs.writeFile(tmp, JSON.stringify(contacts, null, 2), { mode: 0o600 });
-  await fs.rename(tmp, contactsPath);
+  try {
+    await fs.writeFile(tmp, JSON.stringify(contacts, null, 2), { mode: 0o600 });
+    await fs.rename(tmp, contactsPath);
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => {});
+    throw err;
+  }
 };
 
 const chat = await chatApi();
@@ -251,8 +268,8 @@ async function upload(space: string, file: string) {
 /**
  * Where downloads go. The relay keeps its old default (downloads/ here). In
  * read-only mode --out is required, is read relative to the caller's folder,
- * and must sit inside ~/Claude Code Projects (symlinks resolved), never in
- * this project's credentials.
+ * and must sit inside ~/Claude Code Projects (symlinks resolved), outside
+ * this project and outside any dot-folder (.git, .claude, .credentials...).
  */
 async function outDir(): Promise<string> {
   if (!READONLY) {
@@ -262,7 +279,7 @@ async function outDir(): Promise<string> {
   }
   if (!flags.out || flags.out === "true")
     throw new Error("Pass --out <folder inside your project> for downloads.");
-  const root = await fs.realpath(path.join(process.env.HOME ?? "", "Claude Code Projects"));
+  const root = await fs.realpath(path.join(os.homedir(), "Claude Code Projects"));
   const out = path.resolve(cwd, flags.out);
   // Check the nearest existing parent before creating anything.
   let probe = out;
@@ -276,15 +293,35 @@ async function outDir(): Promise<string> {
       probe = up;
     }
   }
+  // Not a project's top folder: that is where agent config files live.
   const inside = (real: string) =>
     real.startsWith(root + path.sep) &&
-    !real.startsWith(path.dirname(config.tokenPath) + path.sep) &&
-    real !== path.dirname(config.tokenPath);
-  if (!inside(probe)) throw new Error(`--out must be inside ${root}.`);
+    path.dirname(real) !== root &&
+    real !== projectRoot &&
+    !real.startsWith(projectRoot + path.sep) &&
+    !path.relative(root, real).split(path.sep).some((seg) => seg.startsWith("."));
+  const why =
+    `--out must be a subfolder of a project in ${root} (e.g. local/files), ` +
+    "not a project's top folder, a dot-folder or this relay's project.";
+  if (!inside(path.resolve(out)) || !inside(probe)) throw new Error(why);
   await fs.mkdir(out, { recursive: true });
   const real = await fs.realpath(out);
-  if (!inside(real)) throw new Error(`--out must be inside ${root}.`);
+  if (!inside(real)) throw new Error(why);
   return real;
+}
+
+/**
+ * Attachment name -> safe file name. Keeps letters, digits, spaces and
+ * . _ ( ) -, no leading dot. In read-only mode, names that agents or tools
+ * load as config or instructions (CLAUDE.md, settings.json, package.json...)
+ * get an "attachment-" prefix so a Chat file can never become one.
+ */
+const RISKY_NAME =
+  /^(claude|agents|gemini|skill|readme)(\.local)?\.md$|^(settings|settings\.local|mcp|package|tsconfig|composer)\.json$|^(makefile|dockerfile|pre-commit|pre-push|post-checkout|envrc|env|npmrc|bashrc|profile)$/i;
+function safeName(raw: string | null | undefined): string {
+  const clean =
+    path.basename(raw ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") || "attachment";
+  return READONLY && RISKY_NAME.test(clean) ? `attachment-${clean}` : clean;
 }
 
 // ---------------------------------------------------------------- lookups
@@ -556,12 +593,17 @@ const commands: Record<string, () => Promise<unknown>> = {
    */
   async get() {
     await self();
-    let name = positional[0];
+    const name = positional[0];
     if (!name?.startsWith("spaces/")) throw new Error("Usage: get spaces/<id>/messages/<id>");
-    // A thread's first message is named X.X; accept the short form X too.
-    const id = name.split("/").pop()!;
-    if (/^spaces\/[^/]+\/messages\/[^/.]+$/.test(name)) name = `${name}.${id}`;
-    const m = (await chat.spaces.messages.get({ name })).data;
+    let m: Message;
+    try {
+      m = (await chat.spaces.messages.get({ name })).data;
+    } catch (err: any) {
+      // A thread's first message is named X.X; accept the short form X too.
+      const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
+      if (!short || (err?.code !== 404 && err?.code !== 400)) throw err;
+      m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
+    }
     return {
       ...shape(m),
       ...(m.attachment?.length
@@ -712,10 +754,7 @@ const commands: Record<string, () => Promise<unknown>> = {
         { resourceName: ref, alt: "media" },
         { responseType: "arraybuffer" }
       );
-      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
-      const clean =
-        path.basename(a.contentName ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
-        "attachment";
+      const clean = safeName(a.contentName);
       const { name: stem, ext } = path.parse(clean);
       for (let n = 0; ; n++) {
         const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
@@ -771,10 +810,7 @@ const commands: Record<string, () => Promise<unknown>> = {
       }
       // Gmail returns base64url (RFC 4648 §5): - _ instead of + /.
       const buf = Buffer.from(a.data, "base64url");
-      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
-      const clean =
-        path.basename(p.filename ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
-        "attachment";
+      const clean = safeName(p.filename);
       const { name: stem, ext } = path.parse(clean);
       for (let n = 0; ; n++) {
         const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
@@ -924,9 +960,11 @@ if (!run) {
   process.exit(1);
 }
 if (READONLY) {
-  // Audit trail: which folder ran which read. No message content is logged.
-  const log = path.join(path.dirname(config.tokenPath), "logs", "chat-read.log");
-  const line = JSON.stringify({ t: new Date().toISOString(), cwd, command, target: positional[0] });
+  // Audit trail: which folder ran which read. No message content, and no
+  // free-text queries (search words, contact names) are logged.
+  const log = path.join(projectRoot, ".credentials", "logs", "chat-read.log");
+  const target = ["search", "contacts"].includes(command) ? undefined : positional[0];
+  const line = JSON.stringify({ t: new Date().toISOString(), cwd, command, target });
   await fs.mkdir(path.dirname(log), { recursive: true }).catch(() => {});
   await fs.appendFile(log, line + "\n", { mode: 0o600 }).catch(() => {});
 }
