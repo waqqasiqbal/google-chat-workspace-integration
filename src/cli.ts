@@ -112,16 +112,23 @@ for (const [id, email] of Object.entries(contacts.byId)) {
 // we loaded (our entries win), then write a temp file and rename it so a
 // reader never sees a half-written cache.
 const saveContacts = async () => {
+  let disk: Partial<Contacts> = {};
   try {
-    const disk: Partial<Contacts> = JSON.parse(await fs.readFile(contactsPath, "utf8"));
-    contacts = {
-      ...disk,
-      ...contacts,
-      byId: { ...disk.byId, ...contacts.byId },
-      people: { ...disk.people, ...contacts.people },
-      names: { ...disk.names, ...contacts.names },
-    };
-  } catch {}
+    disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+  } catch (err: any) {
+    // Unreadable or mid-write: skip saving rather than wipe others' entries.
+    if (err?.code !== "ENOENT") {
+      console.error(`Warning: contacts cache not saved (${err?.message ?? err}).`);
+      return;
+    }
+  }
+  contacts = {
+    ...disk,
+    ...contacts,
+    byId: { ...disk.byId, ...contacts.byId },
+    people: { ...disk.people, ...contacts.people },
+    names: { ...disk.names, ...contacts.names },
+  };
   const tmp = `${contactsPath}.${process.pid}.tmp`;
   try {
     await fs.writeFile(tmp, JSON.stringify(contacts, null, 2), { mode: 0o600 });
@@ -293,17 +300,23 @@ async function outDir(): Promise<string> {
       probe = up;
     }
   }
-  // Not a project's top folder: that is where agent config files live.
-  const inside = (real: string) =>
-    real.startsWith(root + path.sep) &&
-    path.dirname(real) !== root &&
-    real !== projectRoot &&
-    !real.startsWith(projectRoot + path.sep) &&
-    !path.relative(root, real).split(path.sep).some((seg) => seg.startsWith("."));
+  const relay = await fs.realpath(projectRoot);
+  // A project (or one of its .claude/worktrees/<name> checkouts) and then at
+  // least one plain subfolder: never a project's top folder, where agent
+  // config lives, and never a dot-folder.
+  const inside = (real: string, existingParent = false) => {
+    if (!real.startsWith(root + path.sep)) return false;
+    if (real === relay || real.startsWith(relay + path.sep)) return false;
+    const segs = path.relative(root, real).split(path.sep);
+    const base = segs[1] === ".claude" && segs[2] === "worktrees" && segs[3] ? 4 : 1;
+    const below = segs.slice(base);
+    // The nearest existing parent of a new folder may be the project itself.
+    return (existingParent || below.length > 0) && !below.some((seg) => seg.startsWith("."));
+  };
   const why =
     `--out must be a subfolder of a project in ${root} (e.g. local/files), ` +
     "not a project's top folder, a dot-folder or this relay's project.";
-  if (!inside(path.resolve(out)) || !inside(probe)) throw new Error(why);
+  if (!inside(path.resolve(out)) || !inside(probe, true)) throw new Error(why);
   await fs.mkdir(out, { recursive: true });
   const real = await fs.realpath(out);
   if (!inside(real)) throw new Error(why);
@@ -317,11 +330,18 @@ async function outDir(): Promise<string> {
  * get an "attachment-" prefix so a Chat file can never become one.
  */
 const RISKY_NAME =
-  /^(claude|agents|gemini|skill|readme)(\.local)?\.md$|^(settings|settings\.local|mcp|package|tsconfig|composer)\.json$|^(makefile|dockerfile|pre-commit|pre-push|post-checkout|envrc|env|npmrc|bashrc|profile)$/i;
+  /^(claude|agents|gemini|skill|readme|copilot-instructions)(\.local)?\.md$|^(settings|settings\.local|mcp|package|composer|tsconfig.*|jsconfig.*)\.json$|config\.[cm]?[jt]s$/i;
+const RISKY_EXT =
+  /\.(sh|bash|zsh|fish|ps1|bat|cmd|js|mjs|cjs|ts|py|rb|pl|php|toml|ya?ml|ini|cfg|conf|lock)$/i;
 function safeName(raw: string | null | undefined): string {
-  const clean =
-    path.basename(raw ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") || "attachment";
-  return READONLY && RISKY_NAME.test(clean) ? `attachment-${clean}` : clean;
+  const base = path.basename(raw ?? "");
+  const clean = base.replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") || "attachment";
+  if (!READONLY) return clean;
+  // Dotfiles, names with no extension (Makefile, pre-commit, justfile),
+  // scripts and config formats, and known agent/tool config names.
+  const risky =
+    base.startsWith(".") || !path.extname(clean) || RISKY_EXT.test(clean) || RISKY_NAME.test(clean);
+  return risky ? `attachment-${clean}` : clean;
 }
 
 // ---------------------------------------------------------------- lookups
@@ -601,7 +621,8 @@ const commands: Record<string, () => Promise<unknown>> = {
     } catch (err: any) {
       // A thread's first message is named X.X; accept the short form X too.
       const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
-      if (!short || (err?.code !== 404 && err?.code !== 400)) throw err;
+      const status = Number(err?.status ?? err?.response?.status ?? err?.code);
+      if (!short || (status !== 404 && status !== 400)) throw err;
       m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
     }
     return {
