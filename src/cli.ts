@@ -114,10 +114,13 @@ for (const [id, email] of Object.entries(contacts.byId)) {
 const saveContacts = async () => {
   let disk: Partial<Contacts> = {};
   try {
-    disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+    disk = JSON.parse(await fs.readFile(contactsPath, "utf8")) ?? {};
   } catch (err: any) {
-    // Unreadable or mid-write: skip saving rather than wipe others' entries.
-    if (err?.code !== "ENOENT") {
+    if (err instanceof SyntaxError) {
+      // Writes are atomic, so this is real corruption: keep a copy, start fresh.
+      await fs.rename(contactsPath, `${contactsPath}.corrupt-${Date.now()}`).catch(() => {});
+    } else if (err?.code !== "ENOENT") {
+      // Unreadable (permissions...): don't overwrite what others saved.
       console.error(`Warning: contacts cache not saved (${err?.message ?? err}).`);
       return;
     }
@@ -306,9 +309,18 @@ async function outDir(): Promise<string> {
   // config lives, and never a dot-folder.
   const inside = (real: string, existingParent = false) => {
     if (!real.startsWith(root + path.sep)) return false;
-    if (real === relay || real.startsWith(relay + path.sep)) return false;
+    for (const r of [relay, `${relay}-worktrees`])
+      if (real === r || real.startsWith(r + path.sep)) return false;
     const segs = path.relative(root, real).split(path.sep);
-    const base = segs[1] === ".claude" && segs[2] === "worktrees" && segs[3] ? 4 : 1;
+    // Worktree checkouts count as projects: <p>/.claude/worktrees/<name> and
+    // the sibling layout <p>-worktrees/<name>.
+    const base =
+      segs[1] === ".claude" && segs[2] === "worktrees" && segs[3]
+        ? 4
+        : segs[0].endsWith("-worktrees") && segs[1]
+          ? 2
+          : 1;
+    if (segs.slice(base - 1, base).some((seg) => seg.startsWith("."))) return false;
     const below = segs.slice(base);
     // The nearest existing parent of a new folder may be the project itself.
     return (existingParent || below.length > 0) && !below.some((seg) => seg.startsWith("."));
@@ -325,22 +337,24 @@ async function outDir(): Promise<string> {
 
 /**
  * Attachment name -> safe file name. Keeps letters, digits, spaces and
- * . _ ( ) -, no leading dot. In read-only mode, names that agents or tools
- * load as config or instructions (CLAUDE.md, settings.json, package.json...)
- * get an "attachment-" prefix so a Chat file can never become one.
+ * . _ ( ) -, no leading dot. In read-only mode only common document, media
+ * and data files keep their name; anything else (dotfiles, scripts, config
+ * formats, names with no extension) and names agents or tools load as
+ * config (CLAUDE.md, settings.json...) get an "attachment-" prefix, so a Chat
+ * file can never become one.
  */
+const SAFE_EXT =
+  /\.(pdf|docx?|xlsx?|xlsm|csv|tsv|pptx?|odt|ods|odp|rtf|txt|md|eml|msg|png|jpe?g|gif|webp|heic|bmp|tiff?|mp4|mov|webm|mp3|wav|m4a|ogg|zip)$/i;
+// Instruction files agents pick up: CLAUDE.md, AGENTS.md, CONVENTIONS.md,
+// SKILL.md, copilot-instructions.md... (all-caps names and known ones).
 const RISKY_NAME =
-  /^(claude|agents|gemini|skill|readme|copilot-instructions)(\.local)?\.md$|^(settings|settings\.local|mcp|package|composer|tsconfig.*|jsconfig.*)\.json$|config\.[cm]?[jt]s$/i;
-const RISKY_EXT =
-  /\.(sh|bash|zsh|fish|ps1|bat|cmd|js|mjs|cjs|ts|py|rb|pl|php|toml|ya?ml|ini|cfg|conf|lock)$/i;
+  /^[A-Z0-9_-]+(\.local)?\.md$|^(claude|agents?|gemini|qwen|skill|readme|conventions|copilot-instructions)(\.local)?\.md$/i;
 function safeName(raw: string | null | undefined): string {
   const base = path.basename(raw ?? "");
-  const clean = base.replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") || "attachment";
-  if (!READONLY) return clean;
-  // Dotfiles, names with no extension (Makefile, pre-commit, justfile),
-  // scripts and config formats, and known agent/tool config names.
-  const risky =
-    base.startsWith(".") || !path.extname(clean) || RISKY_EXT.test(clean) || RISKY_NAME.test(clean);
+  const clean =
+    base.replace(/[^\w .()-]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/, "") || "attachment";
+  if (!READONLY || clean === "attachment") return clean;
+  const risky = base.startsWith(".") || !SAFE_EXT.test(clean) || RISKY_NAME.test(clean);
   return risky ? `attachment-${clean}` : clean;
 }
 
@@ -622,7 +636,9 @@ const commands: Record<string, () => Promise<unknown>> = {
       // A thread's first message is named X.X; accept the short form X too.
       const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
       const status = Number(err?.status ?? err?.response?.status ?? err?.code);
-      if (!short || (status !== 404 && status !== 400)) throw err;
+      const notFound =
+        status === 404 || status === 400 || /not.?found|malformed/i.test(err?.message ?? "");
+      if (!short || !notFound) throw err;
       m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
     }
     return {
@@ -998,5 +1014,8 @@ try {
   console.error(`Error: ${msg}`);
   process.exitCode = 1;
 } finally {
-  if (contactsDirty) await saveContacts();
+  if (contactsDirty)
+    await saveContacts().catch((err) =>
+      console.error(`Warning: contacts cache not saved (${err?.message ?? err}).`)
+    );
 }

@@ -131,10 +131,12 @@ chat-read gmail-download <gmailMessageId> --out local/files
 - `--out` is required for downloads and is relative to the caller's folder.
   It must be a subfolder of a project in `~/Claude Code Projects` (e.g.
   `local/files`): not a project's top folder, not a dot-folder (`.claude`,
-  `.git`...) and not this project (symlinks resolved). Attachment names that
-  tools load as config (`CLAUDE.md`, `settings.json`, `package.json`...) are
-  saved with an `attachment-` prefix, as are dotfiles, names without an
-  extension, scripts and config formats (.sh, .js, .py, .yaml, .toml...).
+  `.git`...) and not this project (symlinks resolved). Worktrees count as
+  projects (`<p>/.claude/worktrees/<name>`, `<p>-worktrees/<name>`).
+- Only common document, media and archive files keep their name (pdf, docx,
+  xlsx, csv, pptx, txt, md, images, audio, video, zip). Everything else, and
+  instruction-style names such as `CLAUDE.md` or `SKILL.md`, is saved with
+  an `attachment-` prefix so a Chat file can't become config or code.
 - Each run is logged (time, folder, command, target; no content, and no
   search or contact query text) to `.credentials/logs/chat-read.log`.
 - Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
