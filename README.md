@@ -77,11 +77,11 @@ that gap, going through the Gmail API with the read-only `gmail.readonly` scope.
 | --- | --- |
 | `gmail-download <messageId> [--attachment id] [--out dir]` | Save a Gmail message's attachments (default `downloads/`, same name-cleaning and no-overwrite as `download`). `<messageId>` is the id from the Gmail connector's `get_message`/`get_thread`, or the hex id in a Gmail URL. `--attachment` fetches just one part. |
 
-The scope is **not** in the default login. To enable it: add `gmail.readonly`
-to `GOOGLE_CHAT_SCOPES` (it is already in the built-in default list in
-`src/config.ts`), enable the Gmail API and add the scope on the consent screen
-(see [Google Cloud setup](#google-cloud-setup)), then re-run `npm run login` so
-the cached token picks it up.
+The scope is in the built-in default list in `src/config.ts`, so a normal
+`npm run login` requests it. If `.env` sets its own `GOOGLE_CHAT_SCOPES`, add
+`gmail.readonly` there too. The Gmail API must be enabled and the scope added on
+the consent screen (see [Google Cloud setup](#google-cloud-setup)). A token
+minted before the scope was added gets 403 until you re-run `npm run login`.
 
 ### Writing
 
@@ -138,7 +138,7 @@ All of this lives in `.credentials/` (gitignored, mode 0600):
 | `GOOGLE_CLIENT_SECRET` | yes | — |
 | `GOOGLE_REDIRECT_URI` | no | `http://localhost:8080/oauth2callback` |
 | `TOKEN_STORE_PATH` | no | `./.credentials/token.json` |
-| `GOOGLE_CHAT_SCOPES` | no | Chat spaces, memberships, messages, reactions, read state, custom emoji, pins, space settings, sections, availability, plus `userinfo.email` |
+| `GOOGLE_CHAT_SCOPES` | no | Chat spaces, memberships, messages, reactions, read state, custom emoji, pins, space settings, sections, availability, plus `gmail.readonly` and `userinfo.email` |
 | `CHAT_TEST_SPACE` | no | Space used as the `playground` nickname for test sends |
 | `CHAT_SPACE_<NAME>` | no | Space nicknames, e.g. `CHAT_SPACE_AI_TEAM=spaces/X` is `ai-team` |
 
