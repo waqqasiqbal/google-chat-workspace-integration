@@ -128,10 +128,14 @@ chat-read download spaces/AAAA.../messages/BBBB.BBBB --out local/files
 chat-read gmail-download <gmailMessageId> --out local/files
 ```
 
-- `--out` is required for downloads, is relative to the caller's folder and
-  must be inside `~/Claude Code Projects` (symlinks resolved).
-- Each run is logged (time, folder, command, target; no content) to
-  `.credentials/logs/chat-read.log`.
+- `--out` is required for downloads and is relative to the caller's folder.
+  It must be a subfolder of a project in `~/Claude Code Projects` (e.g.
+  `local/files`): not a project's top folder, not a dot-folder (`.claude`,
+  `.git`...) and not this project (symlinks resolved). Attachment names that
+  tools load as config (`CLAUDE.md`, `settings.json`, `package.json`...) are
+  saved with an `attachment-` prefix.
+- Each run is logged (time, folder, command, target; no content, and no
+  search or contact query text) to `.credentials/logs/chat-read.log`.
 - Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
 - Optional hardening: `npm run login:readonly` makes a token with read-only
   scopes in `.credentials/readonly/`; `chat-read` uses it when present.

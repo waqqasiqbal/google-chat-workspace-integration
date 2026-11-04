@@ -55,7 +55,7 @@ nothing else.
 **`chat-read` for other sessions (user's rule, 4 Nov 2026).** `bin/chat-read`
 (`~/bin/chat-read`) runs `cli.js` with `CHAT_READONLY=1`: any folder may run
 it, only the commands in `READ_COMMANDS` run, and downloads need `--out`
-inside `~/Claude Code Projects`. Other sessions read Chat themselves with it;
+in a project subfolder under `~/Claude Code Projects` (see README). Other sessions read Chat themselves with it;
 this session's job is sending. Keep `READ_COMMANDS` free of anything that
 writes, and rebuild after switching branches (`~/bin/chat-read` runs this
 checkout's `dist/`).
