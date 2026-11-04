@@ -133,7 +133,8 @@ chat-read gmail-download <gmailMessageId> --out local/files
   `local/files`): not a project's top folder, not a dot-folder (`.claude`,
   `.git`...) and not this project (symlinks resolved). Attachment names that
   tools load as config (`CLAUDE.md`, `settings.json`, `package.json`...) are
-  saved with an `attachment-` prefix.
+  saved with an `attachment-` prefix, as are dotfiles, names without an
+  extension, scripts and config formats (.sh, .js, .py, .yaml, .toml...).
 - Each run is logged (time, folder, command, target; no content, and no
   search or contact query text) to `.credentials/logs/chat-read.log`.
 - Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
