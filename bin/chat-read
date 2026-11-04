@@ -1,0 +1,15 @@
+#!/bin/sh
+# chat-read: read-only Google Chat (and Gmail attachment) access for every
+# Claude session on this machine. Install: ln -s "<this file>" ~/bin/chat-read
+# Writes (post, reply, react, edit, mark read) stay with the relay session
+# "Google Workspace Chat (Linux)".
+self=$(readlink -f "$0")
+project=$(dirname "$(dirname "$self")")
+export CHAT_READONLY=1
+# Use the read-only token once `npm run login:readonly` has made one; the
+# shared contacts cache stays in .credentials/ either way.
+if [ -f "$project/.credentials/readonly/token.json" ]; then
+  export TOKEN_STORE_PATH="$project/.credentials/readonly/token.json"
+fi
+export CONTACTS_PATH="$project/.credentials/contacts.json"
+exec node "$project/dist/cli.js" "$@"

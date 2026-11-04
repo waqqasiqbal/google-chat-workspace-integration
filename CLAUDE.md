@@ -52,6 +52,14 @@ Space nicknames are `.env` lines `CHAT_SPACE_<NAME>=spaces/X` (plus
 marks Meet meeting chats ("<Event> - Mon DD" unthreaded spaces) read and
 nothing else.
 
+**`chat-read` for other sessions (user's rule, 4 Nov 2026).** `bin/chat-read`
+(`~/bin/chat-read`) runs `cli.js` with `CHAT_READONLY=1`: any folder may run
+it, only the commands in `READ_COMMANDS` run, and downloads need `--out`
+inside `~/Claude Code Projects`. Other sessions read Chat themselves with it;
+this session's job is sending. Keep `READ_COMMANDS` free of anything that
+writes, and rebuild after switching branches (`~/bin/chat-read` runs this
+checkout's `dist/`).
+
 **Reply placement (user's rule).** In DMs and group chats, reply in the main
 conversation (no thread) and tag the person being answered with
 `@email`. In spaces, reply inside the thread of the message being answered.

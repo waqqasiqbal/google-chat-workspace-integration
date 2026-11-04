@@ -20,8 +20,19 @@ type Space = chat_v1.Schema$Space;
 
 // ---------------------------------------------------------------- guard
 
+/**
+ * Read-only mode (CHAT_READONLY=1, set by bin/chat-read). Any session on this
+ * machine may run it from any folder, but only the read commands in
+ * READ_COMMANDS run; every write command is refused before any API call.
+ */
+const READONLY = process.env.CHAT_READONLY === "1";
+const READ_COMMANDS = new Set([
+  "me", "spaces", "dm", "members", "messages", "get", "unread", "mentions",
+  "search", "download", "gmail-download", "aliases", "contacts",
+]);
+
 const cwd = path.resolve(process.cwd());
-if (cwd !== projectRoot && !cwd.startsWith(projectRoot + path.sep)) {
+if (!READONLY && cwd !== projectRoot && !cwd.startsWith(projectRoot + path.sep)) {
   console.error(
     `Refusing to run: Google Chat access is limited to ${projectRoot}.`
   );
@@ -43,6 +54,14 @@ for (let i = 0; i < rest.length; i++) {
     else flags[key] = rest[++i];
   } else positional.push(a);
 }
+if (READONLY && !READ_COMMANDS.has(command ?? "")) {
+  console.error(
+    `chat-read is read-only. Commands: ${[...READ_COMMANDS].join(", ")}. ` +
+      'To post, react, edit or mark read, SendMessage "Google Workspace Chat (Linux)".'
+  );
+  process.exit(command ? 3 : 1);
+}
+
 const num = (k: string, d: number) => {
   if (!flags[k]) return d;
   const n = Number(flags[k]);
@@ -67,7 +86,8 @@ function since(input: string | undefined, fallback: string): string {
 // The Chat API returns people as users/{id} with no name or email. We learn
 // id -> email whenever we resolve someone by email, and keep it locally.
 
-const contactsPath = path.join(path.dirname(config.tokenPath), "contacts.json");
+const contactsPath =
+  process.env.CONTACTS_PATH ?? path.join(path.dirname(config.tokenPath), "contacts.json");
 type Person = { name?: string; id?: string };
 type Contacts = {
   self?: { id: string; email: string };
@@ -87,8 +107,13 @@ for (const [id, email] of Object.entries(contacts.byId)) {
     contactsDirty = true;
   }
 }
-const saveContacts = () =>
-  fs.writeFile(contactsPath, JSON.stringify(contacts, null, 2), { mode: 0o600 });
+// Several sessions may run chat-read at once: write a temp file and rename it
+// so a reader never sees a half-written cache.
+const saveContacts = async () => {
+  const tmp = `${contactsPath}.${process.pid}.tmp`;
+  await fs.writeFile(tmp, JSON.stringify(contacts, null, 2), { mode: 0o600 });
+  await fs.rename(tmp, contactsPath);
+};
 
 const chat = await chatApi();
 
@@ -221,6 +246,45 @@ async function upload(space: string, file: string) {
     media: { mimeType, body: createReadStream(file) },
   });
   return { attachmentDataRef: r.data.attachmentDataRef };
+}
+
+/**
+ * Where downloads go. The relay keeps its old default (downloads/ here). In
+ * read-only mode --out is required, is read relative to the caller's folder,
+ * and must sit inside ~/Claude Code Projects (symlinks resolved), never in
+ * this project's credentials.
+ */
+async function outDir(): Promise<string> {
+  if (!READONLY) {
+    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
+    await fs.mkdir(out, { recursive: true });
+    return out;
+  }
+  if (!flags.out || flags.out === "true")
+    throw new Error("Pass --out <folder inside your project> for downloads.");
+  const root = await fs.realpath(path.join(process.env.HOME ?? "", "Claude Code Projects"));
+  const out = path.resolve(cwd, flags.out);
+  // Check the nearest existing parent before creating anything.
+  let probe = out;
+  while (true) {
+    try {
+      probe = await fs.realpath(probe);
+      break;
+    } catch {
+      const up = path.dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
+  }
+  const inside = (real: string) =>
+    real.startsWith(root + path.sep) &&
+    !real.startsWith(path.dirname(config.tokenPath) + path.sep) &&
+    real !== path.dirname(config.tokenPath);
+  if (!inside(probe)) throw new Error(`--out must be inside ${root}.`);
+  await fs.mkdir(out, { recursive: true });
+  const real = await fs.realpath(out);
+  if (!inside(real)) throw new Error(`--out must be inside ${root}.`);
+  return real;
 }
 
 // ---------------------------------------------------------------- lookups
@@ -486,6 +550,34 @@ const commands: Record<string, () => Promise<unknown>> = {
     };
   },
 
+  /**
+   * One message in full: text, sender, thread, attachment details and the
+   * message it quotes. For replies use `messages <space> --thread <thread>`.
+   */
+  async get() {
+    await self();
+    let name = positional[0];
+    if (!name?.startsWith("spaces/")) throw new Error("Usage: get spaces/<id>/messages/<id>");
+    // A thread's first message is named X.X; accept the short form X too.
+    const id = name.split("/").pop()!;
+    if (/^spaces\/[^/]+\/messages\/[^/.]+$/.test(name)) name = `${name}.${id}`;
+    const m = (await chat.spaces.messages.get({ name })).data;
+    return {
+      ...shape(m),
+      ...(m.attachment?.length
+        ? {
+            attachments: m.attachment.map((a) => ({
+              name: a.contentName,
+              type: a.contentType,
+              source: a.driveDataRef ? "drive" : "upload",
+              ...(a.driveDataRef?.driveFileId ? { driveFileId: a.driveDataRef.driveFileId } : {}),
+            })),
+          }
+        : {}),
+      ...(m.quotedMessageMetadata?.name ? { quotes: m.quotedMessageMetadata.name } : {}),
+    };
+  },
+
   async unread() {
     const me = await self();
     const window = since(flags.days ? `${flags.days}d` : undefined, "7d");
@@ -605,8 +697,8 @@ const commands: Record<string, () => Promise<unknown>> = {
    * this login has no Drive scope.
    */
   async download() {
-    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
-    await fs.mkdir(out, { recursive: true });
+    if (!positional[0]) throw new Error("Usage: download <message name> --out <dir>");
+    const out = await outDir();
     const m = (await chat.spaces.messages.get({ name: positional[0] })).data;
     const saved: string[] = [];
     const skipped: { name?: string | null; reason: string }[] = [];
@@ -651,8 +743,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   async "gmail-download"() {
     const id = positional[0];
     if (!id) throw new Error("Usage: gmail-download <messageId> [--attachment <id>] [--out <dir>]");
-    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
-    await fs.mkdir(out, { recursive: true });
+    const out = await outDir();
     const gmail = await gmailApi();
     const msg = (
       await gmail.users.messages.get({ userId: "me", id, format: "full" })
@@ -831,6 +922,13 @@ if (!run) {
     `Usage: node dist/cli.js <${Object.keys(commands).join("|")}> [args] [--flags]`
   );
   process.exit(1);
+}
+if (READONLY) {
+  // Audit trail: which folder ran which read. No message content is logged.
+  const log = path.join(path.dirname(config.tokenPath), "logs", "chat-read.log");
+  const line = JSON.stringify({ t: new Date().toISOString(), cwd, command, target: positional[0] });
+  await fs.mkdir(path.dirname(log), { recursive: true }).catch(() => {});
+  await fs.appendFile(log, line + "\n", { mode: 0o600 }).catch(() => {});
 }
 try {
   const result = await run();

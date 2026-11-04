@@ -109,6 +109,33 @@ candidates as an error instead of guessing.
 - `--attach` refuses `.env*` files, anything in `.credentials/` and `~/.ssh`.
 - `download` cleans up attachment names and never overwrites an existing file.
 
+## chat-read: read-only access for every session
+
+`bin/chat-read` (installed as `~/bin/chat-read`, a symlink) lets any Claude
+session on this machine read Chat and fetch attachments directly, from its own
+folder. Only read commands run: `me`, `spaces`, `dm`, `members`, `messages`,
+`get`, `unread`, `mentions`, `search`, `download`, `gmail-download`,
+`aliases`, `contacts`. Anything else exits with code 3; writes stay with the
+relay session "Google Workspace Chat (Linux)".
+
+```sh
+chat-read mentions --since 1d
+chat-read messages spaces/AAAA... --since 2h --limit 50
+chat-read messages someone@company.com --limit 20       # DM (never creates one)
+chat-read get spaces/AAAA.../messages/BBBB              # one message, attachments, quote
+chat-read search "PR 123" --since 3d
+chat-read download spaces/AAAA.../messages/BBBB.BBBB --out local/files
+chat-read gmail-download <gmailMessageId> --out local/files
+```
+
+- `--out` is required for downloads, is relative to the caller's folder and
+  must be inside `~/Claude Code Projects` (symlinks resolved).
+- Each run is logged (time, folder, command, target; no content) to
+  `.credentials/logs/chat-read.log`.
+- Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
+- Optional hardening: `npm run login:readonly` makes a token with read-only
+  scopes in `.credentials/readonly/`; `chat-read` uses it when present.
+
 ## Claude Code skills
 
 | Skill | Use |
