@@ -10,7 +10,7 @@ export CHAT_READONLY=1
 # never fall back to the relay's full-scope token. The shared contacts cache
 # stays in .credentials/ either way.
 token="$project/.credentials/readonly/token.json"
-if [ ! -f "$token" ]; then
+if [ ! -s "$token" ]; then
   echo "chat-read: read-only token missing ($token)." >&2
   echo 'Ask the user to run `npm run login:readonly` in the Google Chat MCP project. Until then, SendMessage "Google Workspace Chat (Linux)" for reads.' >&2
   exit 4
