@@ -58,7 +58,9 @@ for (let i = 0; i < rest.length; i++) {
 if (READONLY && !READ_COMMANDS.has(command ?? "")) {
   console.error(
     `chat-read is read-only. Commands: ${[...READ_COMMANDS].join(", ")}. ` +
-      'To post, react, edit or mark read, SendMessage "Google Workspace Chat (Linux)".'
+      `To post, react, edit or mark read, SendMessage "Google Workspace Chat (${
+        process.platform === "darwin" ? "Local" : "Linux"
+      })".`
   );
   process.exit(command ? 3 : 1);
 }
