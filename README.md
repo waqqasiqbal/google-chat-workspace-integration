@@ -140,8 +140,10 @@ chat-read gmail-download <gmailMessageId> --out local/files
 - Each run is logged (time, folder, command, target; no content, and no
   search or contact query text) to `.credentials/logs/chat-read.log`.
 - Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
-- Optional hardening: `npm run login:readonly` makes a token with read-only
-  scopes in `.credentials/readonly/`; `chat-read` uses it when present.
+- Required once: `npm run login:readonly` makes a token with read-only scopes
+  in `.credentials/readonly/` (on a remote machine, forward the redirect port
+  over SSH first). `chat-read` runs only with that token and exits 4 without
+  it; it never uses the relay's full-scope token.
 
 ## Claude Code skills
 
