@@ -142,9 +142,9 @@ specific post, when:
   you post (its transcript timestamp vs `date -u`);
 - the post goes beyond what the user asked or pre-approved: other
   recipients, a space they didn't name or that isn't part of the
-  pre-approved work, or other content (on the transcript path: facts,
-  promises, dates or asks the user didn't give; rewording the user's gist
-  is fine);
+  pre-approved work, or other content (on the transcript path: anything
+  beyond the user's gist, e.g. facts, promises, dates, asks, links or
+  attachments; rewording the gist is fine);
 - a pre-approval is being used after its period ended or after the user's
   words left this conversation;
 - it's an edit, delete, reaction or mark-read that the user didn't type in
