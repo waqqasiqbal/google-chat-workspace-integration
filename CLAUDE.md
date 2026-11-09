@@ -126,16 +126,22 @@ whatever its size: one yes, given where the user asked (user's rule, 9 Nov
 for a period (e.g. "3CX message sending is pre-approved for today" = posts
 and replies the 3CX sessions ask for, until midnight on the Mac's clock),
 post those without the transcript check. It lives only in this
-conversation: after a restart it has lapsed, so ask again.
+conversation: if you can no longer see the user's words (restart,
+compaction, resume), it has lapsed, so ask again.
 
-**Limits on both paths.** Ask here when nothing matches, when the user's
-message is more than 2 hours old when you post (UTC, `date -u`), or when the
-post goes beyond what the user asked or pre-approved: other recipients,
-other content, or a space they didn't name or that isn't part of the
-pre-approved work. Edits, deletes, reactions and mark-read go ahead only
-when the user's typed message asked for that exact action. The tag, Sir
-Hussain and cc fixes are always applied; a tag that would notify someone
-the user didn't name or approve counts as another recipient.
+**Limits on both paths.** Ask here (a yes here always clears it) when:
+- nothing matches;
+- on the transcript path, the user's message is more than 2 hours old when
+  you post (its transcript timestamp vs `date -u`); a pre-approval instead
+  lasts for its stated period;
+- the post goes beyond what the user asked or pre-approved: other
+  recipients, a space they didn't name or that isn't part of the
+  pre-approved work, or content off that work's topic;
+- it's an edit, delete, reaction or mark-read the user didn't type in the
+  asking session (pre-approval never covers these).
+The tag, Sir Hussain and cc fixes are always applied. Turning people the
+text already names into real mentions is fine; a tag that would notify
+someone the user didn't name or approve counts as another recipient.
 
 **No monitoring on behalf of other sessions (user's rule, 9 Oct 2026).** Don't
 run watches, monitors, polling loops or scheduled checks for another session.
