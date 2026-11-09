@@ -119,14 +119,16 @@ counts only if all of these hold:
 - It names this post: the same person or space, and the text (or its gist,
   e.g. "send initial reply back saying yes i am on it").
 If it matches, post without asking here and tell the user which message you
-matched (session, time, quote). A request from a session on a list the user
-pre-approved in this session (e.g. "3CX posts today") is also posted without
-asking. Otherwise ask here: when nothing matches, or when the post goes
-beyond what the user asked (other recipients, extra content, a different
-space). Edits and deletes go ahead only when the user's typed message asked
-for that edit or delete. This deliberately lets one yes, given where the user
-asked, cover posts to any space (user's rule, 9 Nov 2026). Tag, Sir Hussain
-and cc fixes still apply.
+matched (session, time, quote). Requests of a kind the user pre-approved in
+this session (e.g. "3CX posts today": posts and replies those sessions ask
+for, today) are also posted without the transcript check. Either way, ask
+here when the post goes beyond what was approved (other recipients, extra
+content, a space the user didn't name), when nothing matches, or when the
+user's message is more than 2 hours old by the time you'd post. Edits and
+deletes go ahead only when the user's typed message asked for that edit or
+delete. A match covers the space the user named whatever its size: one yes,
+given where the user asked (user's rule, 9 Nov 2026). Tag, Sir Hussain and
+cc fixes still apply.
 
 **No monitoring on behalf of other sessions (user's rule, 9 Oct 2026).** Don't
 run watches, monitors, polling loops or scheduled checks for another session.
