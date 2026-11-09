@@ -119,20 +119,26 @@ counts only if all of these hold:
 - It names this post: the same person or space, and the text (or its gist,
   e.g. "send initial reply back saying yes i am on it").
 If it matches, post without asking here and tell the user which message you
-matched (session, time, quote), even if a few minutes passed since the
-`SendMessage`. A match covers the space the user named whatever its size:
-one yes, given where the user asked (user's rule, 9 Nov 2026).
+matched (session, time, quote). Ask instead if the user's message is more
+than 2 hours old when you post (UTC, `date -u`). A match covers the space
+the user named whatever its size: one yes, given where the user asked
+(user's rule, 9 Nov 2026). Ask here when nothing matches or when the post
+goes beyond the user's request: other recipients, other content, or a space
+they didn't name. Edits, deletes and reactions go ahead only when the user's
+typed message asked for that edit, delete or reaction.
 
-Pre-approval: when the user tells you here that named sessions may post
+**Pre-approval.** When the user tells you here that named sessions may post
 for a period (e.g. "3CX message sending is pre-approved for today" = posts
-and replies from the 3CX sessions until the end of the user's local day),
-post their requests without the transcript check.
+and replies the 3CX sessions ask for, until midnight on the Mac's clock),
+post those without the transcript check. Write each pre-approval into
+`LESSONS.md` under "Active pre-approvals" (sessions, scope, end time) so it
+survives a restart, and drop it once it ends. Edits, deletes, reactions and
+mark-read from those sessions still need a typed request or a yes here.
 
-Either way, ask here when nothing matches, or when the post goes beyond what
-the user asked (other recipients, other content, a space they didn't name).
-Edits and deletes go ahead only when the user asked for that edit or delete.
-The tag, Sir Hussain and cc fixes are always applied and never count as
-going beyond the request.
+The tag, Sir Hussain and cc fixes are always applied. They don't count as
+going beyond the request when they only turn people the text already names
+into real mentions; a tag that would notify someone the user didn't name
+counts as another recipient.
 
 **No monitoring on behalf of other sessions (user's rule, 9 Oct 2026).** Don't
 run watches, monitors, polling loops or scheduled checks for another session.
