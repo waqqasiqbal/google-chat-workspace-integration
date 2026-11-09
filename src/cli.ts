@@ -60,7 +60,8 @@ if (READONLY && !READ_COMMANDS.has(command ?? "")) {
     `chat-read is read-only. Commands: ${[...READ_COMMANDS].join(", ")}. ` +
       // bin/chat-read picks the relay name; one source for both messages.
       `To post, react, edit or mark read, SendMessage "${
-        process.env.CHAT_RELAY_NAME ?? "Google Workspace Chat (Local)"
+        process.env.CHAT_RELAY_NAME ??
+        `Google Workspace Chat (${process.platform === "darwin" ? "Local" : "Linux"})`
       }".`
   );
   process.exit(command ? 3 : 1);
