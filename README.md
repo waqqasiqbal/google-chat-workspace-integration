@@ -116,7 +116,7 @@ session on this machine read Chat and fetch attachments directly, from its own
 folder. Only read commands run: `me`, `spaces`, `dm`, `members`, `messages`,
 `get`, `unread`, `mentions`, `search`, `download`, `gmail-download`,
 `aliases`, `contacts`. Anything else exits with code 3; writes stay with the
-relay session "Google Workspace Chat (Linux)".
+relay session ("Google Workspace Chat (Local)" on the Mac, "(Linux)" on Linux).
 
 ```sh
 chat-read mentions --since 1d

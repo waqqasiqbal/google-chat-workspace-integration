@@ -10,6 +10,7 @@ case "$(uname -s)" in
   Darwin) relay="Google Workspace Chat (Local)" ;;
   *) relay="Google Workspace Chat (Linux)" ;;
 esac
+export CHAT_RELAY_NAME="$relay"
 # Only ever run with the read-only token (made by `npm run login:readonly`);
 # never fall back to the relay's full-scope token. The shared contacts cache
 # stays in .credentials/ either way.
