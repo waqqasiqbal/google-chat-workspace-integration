@@ -65,6 +65,8 @@ you're not sure which kind it is.
 cached contact. If it doesn't resolve, `send`/`edit` refuse with "Unresolved
 tag(s)": look the person up and use `@email`, then send again. Never send a tag
 that won't notify the person, and don't ask the user about it — just fix it.
+Fixing the format never widens who is notified: tagging someone the user
+didn't name follows CLAUDE.md "Limits on both paths".
 
 **@all:** `send`/`edit` refuse text containing `@all` unless you pass
 `--mention-all`. Use it only when the user's approved text tags everyone.
