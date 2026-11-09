@@ -58,11 +58,12 @@ for (let i = 0; i < rest.length; i++) {
 if (READONLY && !READ_COMMANDS.has(command ?? "")) {
   console.error(
     `chat-read is read-only. Commands: ${[...READ_COMMANDS].join(", ")}. ` +
-      // bin/chat-read picks the relay name; one source for both messages.
-      `To post, react, edit or mark read, SendMessage "${
-        process.env.CHAT_RELAY_NAME ??
-        `Google Workspace Chat (${process.platform === "darwin" ? "Local" : "Linux"})`
-      }".`
+      // bin/chat-read picks the relay name (CHAT_RELAY_NAME); without it, stay generic.
+      `To post, react, edit or mark read, ${
+        process.env.CHAT_RELAY_NAME
+          ? `SendMessage "${process.env.CHAT_RELAY_NAME}"`
+          : "ask this machine's Google Workspace Chat relay session"
+      }.`
   );
   process.exit(command ? 3 : 1);
 }
