@@ -8,6 +8,7 @@
  * session started elsewhere cannot use it by accident.
  */
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { google, chat_v1 } from "googleapis";
 import { getAuthorizedClient } from "./auth/client.js";
@@ -20,8 +21,19 @@ type Space = chat_v1.Schema$Space;
 
 // ---------------------------------------------------------------- guard
 
+/**
+ * Read-only mode (CHAT_READONLY=1, set by bin/chat-read). Any session on this
+ * machine may run it from any folder, but only the read commands in
+ * READ_COMMANDS run; every write command is refused before any API call.
+ */
+const READONLY = process.env.CHAT_READONLY === "1";
+const READ_COMMANDS = new Set([
+  "me", "spaces", "dm", "members", "messages", "get", "unread", "mentions",
+  "search", "download", "gmail-download", "aliases", "contacts",
+]);
+
 const cwd = path.resolve(process.cwd());
-if (cwd !== projectRoot && !cwd.startsWith(projectRoot + path.sep)) {
+if (!READONLY && cwd !== projectRoot && !cwd.startsWith(projectRoot + path.sep)) {
   console.error(
     `Refusing to run: Google Chat access is limited to ${projectRoot}.`
   );
@@ -43,6 +55,19 @@ for (let i = 0; i < rest.length; i++) {
     else flags[key] = rest[++i];
   } else positional.push(a);
 }
+if (READONLY && !READ_COMMANDS.has(command ?? "")) {
+  console.error(
+    `chat-read is read-only. Commands: ${[...READ_COMMANDS].join(", ")}. ` +
+      // bin/chat-read picks the relay name (CHAT_RELAY_NAME); without it, stay generic.
+      `To post, react, edit or mark read, ${
+        process.env.CHAT_RELAY_NAME
+          ? `SendMessage "${process.env.CHAT_RELAY_NAME}"`
+          : "ask this machine's Google Workspace Chat relay session"
+      }.`
+  );
+  process.exit(command ? 3 : 1);
+}
+
 const num = (k: string, d: number) => {
   if (!flags[k]) return d;
   const n = Number(flags[k]);
@@ -67,7 +92,8 @@ function since(input: string | undefined, fallback: string): string {
 // The Chat API returns people as users/{id} with no name or email. We learn
 // id -> email whenever we resolve someone by email, and keep it locally.
 
-const contactsPath = path.join(path.dirname(config.tokenPath), "contacts.json");
+const contactsPath =
+  process.env.CONTACTS_PATH ?? path.join(path.dirname(config.tokenPath), "contacts.json");
 type Person = { name?: string; id?: string };
 type Contacts = {
   self?: { id: string; email: string };
@@ -77,7 +103,16 @@ type Contacts = {
 };
 let contacts: Contacts = { byId: {}, people: {}, names: {} };
 try {
-  contacts = { ...contacts, ...JSON.parse(await fs.readFile(contactsPath, "utf8")) };
+  const disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+  // Ignore a cache of the wrong shape; saveContacts sets it aside.
+  if (disk && typeof disk === "object" && !Array.isArray(disk))
+    contacts = {
+      ...contacts,
+      ...disk,
+      byId: { ...(disk.byId ?? {}) },
+      people: { ...(disk.people ?? {}) },
+      names: { ...(disk.names ?? {}) },
+    };
 } catch {}
 let contactsDirty = false;
 // Older caches only had byId; make sure each of those has a people entry.
@@ -87,8 +122,42 @@ for (const [id, email] of Object.entries(contacts.byId)) {
     contactsDirty = true;
   }
 }
-const saveContacts = () =>
-  fs.writeFile(contactsPath, JSON.stringify(contacts, null, 2), { mode: 0o600 });
+// Several sessions may run chat-read at once: merge what others saved since
+// we loaded (our entries win), then write a temp file and rename it so a
+// reader never sees a half-written cache.
+const saveContacts = async () => {
+  let disk: Partial<Contacts> = {};
+  try {
+    disk = JSON.parse(await fs.readFile(contactsPath, "utf8"));
+    if (!disk || typeof disk !== "object" || Array.isArray(disk))
+      throw new SyntaxError("contacts cache is not an object");
+  } catch (err: any) {
+    if (err instanceof SyntaxError) {
+      disk = {};
+      // Writes are atomic, so this is real corruption: keep a copy, start fresh.
+      await fs.rename(contactsPath, `${contactsPath}.corrupt-${Date.now()}`).catch(() => {});
+    } else if (err?.code !== "ENOENT") {
+      // Unreadable (permissions...): don't overwrite what others saved.
+      console.error(`Warning: contacts cache not saved (${err?.message ?? err}).`);
+      return;
+    }
+  }
+  contacts = {
+    ...disk,
+    ...contacts,
+    byId: { ...disk.byId, ...contacts.byId },
+    people: { ...disk.people, ...contacts.people },
+    names: { ...disk.names, ...contacts.names },
+  };
+  const tmp = `${contactsPath}.${process.pid}.tmp`;
+  try {
+    await fs.writeFile(tmp, JSON.stringify(contacts, null, 2), { mode: 0o600 });
+    await fs.rename(tmp, contactsPath);
+  } catch (err) {
+    await fs.unlink(tmp).catch(() => {});
+    throw err;
+  }
+};
 
 const chat = await chatApi();
 
@@ -221,6 +290,98 @@ async function upload(space: string, file: string) {
     media: { mimeType, body: createReadStream(file) },
   });
   return { attachmentDataRef: r.data.attachmentDataRef };
+}
+
+/**
+ * Where downloads go. The relay keeps its old default (downloads/ here). In
+ * read-only mode --out is required, is read relative to the caller's folder,
+ * and must sit inside ~/Claude Code Projects (symlinks resolved), outside
+ * this project and outside any dot-folder (.git, .claude, .credentials...).
+ */
+async function outDir(): Promise<string> {
+  if (!READONLY) {
+    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
+    await fs.mkdir(out, { recursive: true });
+    return out;
+  }
+  if (!flags.out || flags.out === "true")
+    throw new Error("Pass --out <folder inside your project> for downloads.");
+  const root = await fs.realpath(path.join(os.homedir(), "Claude Code Projects"));
+  const out = path.resolve(cwd, flags.out);
+  // Check the nearest existing parent before creating anything.
+  let probe = out;
+  while (true) {
+    try {
+      probe = await fs.realpath(probe);
+      break;
+    } catch {
+      const up = path.dirname(probe);
+      if (up === probe) break;
+      probe = up;
+    }
+  }
+  const relay = await fs.realpath(projectRoot);
+  // A project (or one of its .claude/worktrees/<name> checkouts) and then at
+  // least one plain subfolder: never a project's top folder, where agent
+  // config lives, and never a dot-folder.
+  const inside = (real: string, existingParent = false) => {
+    if (!real.startsWith(root + path.sep)) return false;
+    for (const r of [relay, `${relay}-worktrees`])
+      if (real === r || real.startsWith(r + path.sep)) return false;
+    const segs = path.relative(root, real).split(path.sep);
+    // Worktree checkouts count as projects: <p>/.claude/worktrees/<name> and
+    // the sibling layout <p>-worktrees/<name>.
+    const base =
+      segs[1] === ".claude" && segs[2] === "worktrees" && segs[3]
+        ? 4
+        : segs[0].endsWith("-worktrees")
+          ? 2
+          : 1;
+    // The project (or worktree) itself must exist as named: no dot-folders
+    // besides the literal .claude of .claude/worktrees.
+    if (segs.length < base) return false;
+    if (segs.slice(0, base).some((seg, i) => seg.startsWith(".") && !(base === 4 && i === 1)))
+      return false;
+    const below = segs.slice(base);
+    // The nearest existing parent of a new folder may be the project itself.
+    return (existingParent || below.length > 0) && !below.some((seg) => seg.startsWith("."));
+  };
+  const why =
+    `--out must be a subfolder of a project in ${root} (e.g. local/files), ` +
+    "not a project's top folder, a dot-folder or this relay's project.";
+  if (!inside(path.resolve(out)) || !inside(probe, true)) throw new Error(why);
+  await fs.mkdir(out, { recursive: true });
+  const real = await fs.realpath(out);
+  if (!inside(real)) throw new Error(why);
+  return real;
+}
+
+/**
+ * Attachment name -> safe file name. Keeps letters, digits, spaces and
+ * . _ ( ) -, no leading dot. In read-only mode only common document, media
+ * and data files keep their name; anything else (dotfiles, scripts, config
+ * formats, names with no extension) and names agents or tools load as
+ * config (CLAUDE.md, settings.json...) get an "attachment-" prefix, so a Chat
+ * file can never become one.
+ */
+const SAFE_EXT =
+  /\.(pdf|docx?|xlsx?|xlsm|csv|tsv|pptx?|odt|ods|odp|rtf|txt|md|eml|msg|png|jpe?g|gif|webp|heic|bmp|tiff?|mp4|mov|webm|mp3|wav|m4a|ogg|zip)$/i;
+// Instruction files agents pick up: CLAUDE.md, AGENTS.override.md, SKILL (1).md,
+// copilot-instructions.md... Judged on the stem before the first dot, space
+// or bracket: all-caps stems and known names.
+const KNOWN_INSTRUCTION = /^(claude|agents?|gemini|qwen|skill|readme|conventions|copilot-instructions)$/i;
+function instructionLike(name: string): boolean {
+  if (!/\.md$/i.test(name)) return false;
+  const stem = name.split(/[ .(]/)[0];
+  return (/^[A-Z0-9_-]+$/.test(stem) && /[A-Z]/.test(stem)) || KNOWN_INSTRUCTION.test(stem);
+}
+function safeName(raw: string | null | undefined): string {
+  const base = path.basename(raw ?? "");
+  const clean =
+    base.replace(/[^\w .()-]/g, "_").replace(/^\.+/, "").replace(/[. ]+$/, "") || "attachment";
+  if (!READONLY || clean === "attachment") return clean;
+  const risky = base.startsWith(".") || !SAFE_EXT.test(clean) || instructionLike(clean);
+  return risky ? `attachment-${clean}` : clean;
 }
 
 // ---------------------------------------------------------------- lookups
@@ -486,6 +647,41 @@ const commands: Record<string, () => Promise<unknown>> = {
     };
   },
 
+  /**
+   * One message in full: text, sender, thread, attachment details and the
+   * message it quotes. For replies use `messages <space> --thread <thread>`.
+   */
+  async get() {
+    await self();
+    const name = positional[0];
+    if (!name?.startsWith("spaces/")) throw new Error("Usage: get spaces/<id>/messages/<id>");
+    let m: Message;
+    try {
+      m = (await chat.spaces.messages.get({ name })).data;
+    } catch (err: any) {
+      // A thread's first message is named X.X; accept the short form X too.
+      const short = /^spaces\/[^/]+\/messages\/([^/.]+)$/.exec(name);
+      const status = Number(err?.status ?? err?.response?.status ?? err?.code);
+      const notFound = status === 404 || status === 400 || err?.code === "NOT_FOUND";
+      if (!short || !notFound) throw err;
+      m = (await chat.spaces.messages.get({ name: `${name}.${short[1]}` })).data;
+    }
+    return {
+      ...shape(m),
+      ...(m.attachment?.length
+        ? {
+            attachments: m.attachment.map((a) => ({
+              name: a.contentName,
+              type: a.contentType,
+              source: a.driveDataRef ? "drive" : "upload",
+              ...(a.driveDataRef?.driveFileId ? { driveFileId: a.driveDataRef.driveFileId } : {}),
+            })),
+          }
+        : {}),
+      ...(m.quotedMessageMetadata?.name ? { quotes: m.quotedMessageMetadata.name } : {}),
+    };
+  },
+
   async unread() {
     const me = await self();
     const window = since(flags.days ? `${flags.days}d` : undefined, "7d");
@@ -605,8 +801,8 @@ const commands: Record<string, () => Promise<unknown>> = {
    * this login has no Drive scope.
    */
   async download() {
-    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
-    await fs.mkdir(out, { recursive: true });
+    if (!positional[0]) throw new Error("Usage: download <message name> --out <dir>");
+    const out = await outDir();
     const m = (await chat.spaces.messages.get({ name: positional[0] })).data;
     const saved: string[] = [];
     const skipped: { name?: string | null; reason: string }[] = [];
@@ -620,10 +816,7 @@ const commands: Record<string, () => Promise<unknown>> = {
         { resourceName: ref, alt: "media" },
         { responseType: "arraybuffer" }
       );
-      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
-      const clean =
-        path.basename(a.contentName ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
-        "attachment";
+      const clean = safeName(a.contentName);
       const { name: stem, ext } = path.parse(clean);
       for (let n = 0; ; n++) {
         const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
@@ -651,8 +844,7 @@ const commands: Record<string, () => Promise<unknown>> = {
   async "gmail-download"() {
     const id = positional[0];
     if (!id) throw new Error("Usage: gmail-download <messageId> [--attachment <id>] [--out <dir>]");
-    const out = path.resolve(flags.out ?? path.join(projectRoot, "downloads"));
-    await fs.mkdir(out, { recursive: true });
+    const out = await outDir();
     const gmail = await gmailApi();
     const msg = (
       await gmail.users.messages.get({ userId: "me", id, format: "full" })
@@ -680,10 +872,7 @@ const commands: Record<string, () => Promise<unknown>> = {
       }
       // Gmail returns base64url (RFC 4648 §5): - _ instead of + /.
       const buf = Buffer.from(a.data, "base64url");
-      // Keep letters, digits, spaces and . _ ( ) -; no leading dot.
-      const clean =
-        path.basename(p.filename ?? "").replace(/[^\w .()-]/g, "_").replace(/^\.+/, "") ||
-        "attachment";
+      const clean = safeName(p.filename);
       const { name: stem, ext } = path.parse(clean);
       for (let n = 0; ; n++) {
         const file = path.join(out, n ? `${stem} (${n})${ext}` : clean);
@@ -832,6 +1021,15 @@ if (!run) {
   );
   process.exit(1);
 }
+if (READONLY) {
+  // Audit trail: which folder ran which read. No message content, and no
+  // free-text queries (search words, contact names) are logged.
+  const log = path.join(projectRoot, ".credentials", "logs", "chat-read.log");
+  const target = ["search", "contacts"].includes(command) ? undefined : positional[0];
+  const line = JSON.stringify({ t: new Date().toISOString(), cwd, command, target });
+  await fs.mkdir(path.dirname(log), { recursive: true }).catch(() => {});
+  await fs.appendFile(log, line + "\n", { mode: 0o600 }).catch(() => {});
+}
 try {
   const result = await run();
   console.log(JSON.stringify(result, null, 2));
@@ -841,5 +1039,8 @@ try {
   console.error(`Error: ${msg}`);
   process.exitCode = 1;
 } finally {
-  if (contactsDirty) await saveContacts();
+  if (contactsDirty)
+    await saveContacts().catch((err) =>
+      console.error(`Warning: contacts cache not saved (${err?.message ?? err}).`)
+    );
 }

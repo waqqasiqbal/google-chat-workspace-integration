@@ -6,7 +6,8 @@
     "build": "tsc",
     "dev": "tsc --watch",
     "login": "node dist/auth/login.js",
-    "start": "node dist/index.js"
+    "start": "node dist/index.js",
+    "login:readonly": "TOKEN_STORE_PATH=.credentials/readonly/token.json GOOGLE_CHAT_SCOPES=https://www.googleapis.com/auth/chat.spaces.readonly,https://www.googleapis.com/auth/chat.memberships.readonly,https://www.googleapis.com/auth/chat.messages.readonly,https://www.googleapis.com/auth/chat.users.readstate.readonly,https://www.googleapis.com/auth/userinfo.email,https://www.googleapis.com/auth/gmail.readonly node dist/auth/login.js"
   },
   "keywords": [],
   "author": "",

@@ -109,6 +109,42 @@ candidates as an error instead of guessing.
 - `--attach` refuses `.env*` files, anything in `.credentials/` and `~/.ssh`.
 - `download` cleans up attachment names and never overwrites an existing file.
 
+## chat-read: read-only access for every session
+
+`bin/chat-read` (installed as `~/bin/chat-read`, a symlink) lets any Claude
+session on this machine read Chat and fetch attachments directly, from its own
+folder. Only read commands run: `me`, `spaces`, `dm`, `members`, `messages`,
+`get`, `unread`, `mentions`, `search`, `download`, `gmail-download`,
+`aliases`, `contacts`. Any other command exits with code 3 (no command: 1); writes stay with the
+relay session ("Google Workspace Chat (Local)" on the Mac, "(Linux)" on Linux).
+
+```sh
+chat-read mentions --since 1d
+chat-read messages spaces/AAAA... --since 2h --limit 50
+chat-read messages someone@company.com --limit 20       # DM (never creates one)
+chat-read get spaces/AAAA.../messages/BBBB              # one message, attachments, quote
+chat-read search "PR 123" --since 3d
+chat-read download spaces/AAAA.../messages/BBBB.BBBB --out local/files
+chat-read gmail-download <gmailMessageId> --out local/files
+```
+
+- `--out` is required for downloads and is relative to the caller's folder.
+  It must be a subfolder of a project in `~/Claude Code Projects` (e.g.
+  `local/files`): not a project's top folder, not a dot-folder (`.claude`,
+  `.git`...) and not this project (symlinks resolved). Worktrees count as
+  projects (`<p>/.claude/worktrees/<name>`, `<p>-worktrees/<name>`).
+- Only common document, media and archive files keep their name (pdf, docx,
+  xlsx, csv, pptx, txt, md, images, audio, video, zip). Everything else, and
+  instruction-style names such as `CLAUDE.md` or `SKILL.md`, is saved with
+  an `attachment-` prefix so a Chat file can't become config or code.
+- Each run is logged (time, folder, command, target; no content, and no
+  search or contact query text) to `.credentials/logs/chat-read.log`.
+- Install: `ln -s "$PWD/bin/chat-read" ~/bin/chat-read` after `npm run build`.
+- Required once: `npm run login:readonly` makes a token with read-only scopes
+  in `.credentials/readonly/` (on a remote machine, forward the redirect port
+  over SSH first). `chat-read` runs only with that token and exits 4 without
+  it; it never uses the relay's full-scope token.
+
 ## Claude Code skills
 
 | Skill | Use |
