@@ -118,7 +118,8 @@ counts only if all of these hold:
   Chat message) doesn't count either; when in doubt, ask.
 - It was typed before that `SendMessage`.
 - It names this post: the same person or space, and the text (or its gist,
-  e.g. "send initial reply back saying yes i am on it").
+  e.g. "send initial reply back saying yes i am on it", or for a draft the
+  user asked the session to write, its topic as below).
 If it matches, post without asking here and tell the user which message you
 matched (session, time, quote). A match covers the space the user named
 whatever its size: one yes, given where the user asked (user's rule, 9 Nov
@@ -144,12 +145,16 @@ specific post, when:
   recipients, a space they didn't name or that isn't part of the
   pre-approved work, or other content (on the transcript path: anything
   beyond the user's gist, e.g. facts, promises, dates, asks, links or
-  attachments; rewording the gist is fine). When the user told the
-  session to write the text itself ("make a request and send to Lloyd"),
-  the session's draft counts as the gist as long as it stays on the topic
-  the user gave: related questions and details are fine; a promise,
-  deadline or commitment on the user's behalf, or a new topic, still
-  needs a yes (user's rule, 10 Nov 2026);
+  attachments; rewording the gist is fine). On the transcript path only:
+  when the user told the session to write the text itself ("make a
+  request and send to Lloyd"), the session's draft counts as the gist if
+  it stays on the topic named in the user's message or in the session's
+  question that message directly answers (the assistant text just before
+  it in the same transcript). Related questions and work details are
+  fine. Still ask for: a promise, deadline or commitment on the user's
+  behalf; a new topic; links or attachments; credentials, keys or
+  customer personal data. One such instruction covers one post (user's
+  rule, 10 Nov 2026);
 - a pre-approval is being used after its period ended or after the user's
   words left this conversation;
 - it's an edit, delete, reaction or mark-read that the user didn't type in
