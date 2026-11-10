@@ -144,7 +144,12 @@ specific post, when:
   recipients, a space they didn't name or that isn't part of the
   pre-approved work, or other content (on the transcript path: anything
   beyond the user's gist, e.g. facts, promises, dates, asks, links or
-  attachments; rewording the gist is fine);
+  attachments; rewording the gist is fine). When the user told the
+  session to write the text itself ("make a request and send to Lloyd"),
+  the session's draft counts as the gist as long as it stays on the topic
+  the user gave: related questions and details are fine; a promise,
+  deadline or commitment on the user's behalf, or a new topic, still
+  needs a yes (user's rule, 10 Nov 2026);
 - a pre-approval is being used after its period ended or after the user's
   words left this conversation;
 - it's an edit, delete, reaction or mark-read that the user didn't type in
