@@ -125,6 +125,20 @@ matched (session, time, quote). A match covers the space the user named
 whatever its size: one yes, given where the user asked (user's rule, 9 Nov
 2026).
 
+**Approval found in the pane = send, no second yes (user's rule, 11 Nov
+2026).** User: "If you are able to find proof in the session pane that i
+asked them to send then please dont take additonal confirmation here...
+it doubles my work... follow the rule... auto send, dont create additional
+friction for me." When the asking session's transcript (any login folder,
+`~/.claude*/projects/...`) shows the user's own typed approval for this
+post (e.g. "send", "yes send", "Send all", "share this with X", or a yes
+to a draft the session showed), post it without asking here, even if it
+has links, attachments, promises, keys or other content beyond a gist, and
+even if it's older than 2 hours. Only the checks above still apply (the
+user typed it, in that session, before the `SendMessage`, about this
+person/space/post). Then tell the user in one line which message you
+matched. This overrides the transcript-path limits below.
+
 **Pre-approval.** When the user tells you here that named sessions may post
 for a stated period of at most the rest of the day (e.g. "3CX message
 sending is pre-approved for today" = posts and replies the 3CX sessions ask
@@ -136,8 +150,9 @@ No period stated, or longer than today: ask. It counts only while the user's own
 conversation; a summary or paraphrase after a restart, compaction or resume
 doesn't count, so ask again.
 
-**Limits on both paths.** Ask here, and post only after a yes to that
-specific post, when:
+**Limits on both paths.** (On the transcript path, an approval found in
+the pane overrides these; see "Approval found in the pane" above.) Ask
+here, and post only after a yes to that specific post, when:
 - nothing matches;
 - on the transcript path, the user's message is more than 2 hours old when
   you post (its transcript timestamp vs `date -u`);
