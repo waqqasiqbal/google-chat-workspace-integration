@@ -122,8 +122,11 @@ relay session ("Google Workspace Chat (Local)" on the Mac, "(Linux)" on Linux).
 chat-read mentions --since 1d
 chat-read messages spaces/AAAA... --since 2h --limit 50
 chat-read messages someone@company.com --limit 20       # DM (never creates one)
+chat-read messages someone@company.com --limit 2000 --until 2026-09-01   # older history
+chat-read messages spaces/AAAA... --limit 1000 --page-token <nextPageToken>  # next page
 chat-read get spaces/AAAA.../messages/BBBB              # one message, attachments, quote
 chat-read search "PR 123" --since 3d
+chat-read search ideas --in someone@company.com --since 2026-01-01 --max 5000  # scan more per space
 chat-read download spaces/AAAA.../messages/BBBB.BBBB --out local/files
 chat-read gmail-download <gmailMessageId> --out local/files
 ```
