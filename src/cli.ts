@@ -519,14 +519,16 @@ function shape(m: Message) {
  * The newest `cap` messages since sinceIso, returned oldest-first. Fetches
  * newest-first so a busy space never hides its latest messages behind the cap.
  */
-async function messagesSince(space: string, sinceIso: string, cap = 200) {
+async function messagesSince(space: string, sinceIso: string, cap = 200, untilIso?: string) {
   const out: Message[] = [];
   let pageToken: string | undefined;
+  const filter =
+    `createTime > "${sinceIso}"` + (untilIso ? ` AND createTime < "${untilIso}"` : "");
   do {
     const r = await chat.spaces.messages.list({
       parent: space,
-      pageSize: Math.min(100, cap - out.length),
-      filter: `createTime > "${sinceIso}"`,
+      pageSize: Math.min(1000, cap - out.length),
+      filter,
       orderBy: "createTime desc",
       pageToken,
     });
@@ -630,20 +632,36 @@ const commands: Record<string, () => Promise<unknown>> = {
     const space = await resolve(positional[0]);
     const filters: string[] = [];
     if (flags.since) filters.push(`createTime > "${since(flags.since, "1d")}"`);
+    // --until: only messages older than this (page back past the newest 1,000).
+    if (flags.until) filters.push(`createTime < "${since(flags.until, "0m")}"`);
     if (flags.thread) filters.push(`thread.name = "${flags.thread}"`);
-    const r = await chat.spaces.messages.list({
-      parent: space,
-      pageSize: num("limit", 10),
-      orderBy: "createTime desc",
-      filter: filters.join(" AND ") || undefined,
-    });
+    // --limit may exceed the API's 1,000-per-page maximum: keep paging,
+    // newest first, from --page-token if given, and hand back the next token.
+    const limit = num("limit", 10);
+    const out: Message[] = [];
+    let pageToken: string | undefined =
+      flags["page-token"] && flags["page-token"] !== "true" ? flags["page-token"] : undefined;
+    do {
+      const r = await chat.spaces.messages.list({
+        parent: space,
+        pageSize: Math.min(1000, limit - out.length),
+        orderBy: "createTime desc",
+        filter: filters.join(" AND ") || undefined,
+        pageToken,
+      });
+      out.push(...(r.data.messages ?? []));
+      pageToken = r.data.nextPageToken ?? undefined;
+    } while (pageToken && out.length < limit);
     const read = await chat.users.spaces.getSpaceReadState({
       name: `users/me/${space}/spaceReadState`,
     });
     return {
       space,
       lastReadTime: read.data.lastReadTime,
-      messages: (r.data.messages ?? []).reverse().map(shape),
+      messages: out.reverse().map(shape),
+      // Older messages remain: pass this as --page-token (same other flags),
+      // or use --until <time of the oldest message above>.
+      ...(pageToken ? { nextPageToken: pageToken } : {}),
     };
   },
 
@@ -734,16 +752,30 @@ const commands: Record<string, () => Promise<unknown>> = {
     const words = positional.map((w) => w.toLowerCase());
     if (!words.length) throw new Error("Give one or more keywords.");
     const window = since(flags.since, "3d");
+    const until = flags.until ? since(flags.until, "0m") : undefined;
+    // --max: messages scanned per space (newest first within the window).
+    const max = num("max", 500);
     const spaces = flags.in
       ? [{ name: await resolve(flags.in) } as Space]
       : await activeSpaces(window, num("spaces", 100));
-    const hits = await pool(spaces, 10, async (s) =>
-      (await messagesSince(s.name!, window, 500))
+    let capped = 0;
+    const hits = await pool(spaces, 10, async (s) => {
+      const msgs = await messagesSince(s.name!, window, max, until);
+      if (msgs.capped) capped++;
+      return msgs
         .filter((m) => words.every((w) => (m.text ?? "").toLowerCase().includes(w)))
-        .map((m) => ({ displayName: label(s), space: s.name, ...shape(m) }))
-    );
+        .map((m) => ({ displayName: label(s), space: s.name, ...shape(m) }));
+    });
     return {
-      searched: { spaces: spaces.length, since: window },
+      searched: {
+        spaces: spaces.length,
+        since: window,
+        ...(until ? { until } : {}),
+        maxPerSpace: max,
+        // Spaces with more messages in the window than --max: older ones were
+        // not scanned. Raise --max or narrow with --until.
+        ...(capped ? { cappedSpaces: capped } : {}),
+      },
       results: hits
         .flat()
         .filter((h) => h !== undefined)
